@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mnemo-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm run start:api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      # Frontend origin(s) allowed to call this API — update after the first Vercel deploy.
+      - key: CORS_ORIGINS
+        value: https://your-app.vercel.app
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: MEMWAL_SERVER_URL
+        value: https://relayer.memory.walrus.xyz
+      - key: MEMWAL_NETWORK
+        value: mainnet
+      - key: MEMWAL_MIN_RELEVANCE
+        value: "0.2"
+      - key: SESSION_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MEMWAL_PRIVATE_KEY
+        sync: false
+      - key: MEMWAL_ACCOUNT_ID
+        sync: false
