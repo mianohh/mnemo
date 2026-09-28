@@ -84,7 +84,9 @@ export function SiteHeader() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
               <DropdownMenuGroup>
-                <DropdownMenuLabel>Signed in with Sui</DropdownMenuLabel>
+                <DropdownMenuLabel className="truncate">
+                  {session.email ?? "Signed in with Sui"}
+                </DropdownMenuLabel>
               </DropdownMenuGroup>
               <div className="px-1.5 pb-1.5 font-mono text-[11px] break-all text-foreground">
                 {session.address}
@@ -98,7 +100,7 @@ export function SiteHeader() {
               </div>
               <p className="px-1.5 pb-1.5 text-xs text-muted-foreground">
                 One isolated namespace on Walrus Memory, derived from your
-                wallet address. The server never accepts a namespace from the
+                sign-in address. The server never accepts a namespace from the
                 client.
               </p>
               <DropdownMenuSeparator />

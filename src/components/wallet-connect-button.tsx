@@ -20,10 +20,13 @@ export function WalletConnectButton({
   className,
   size = "lg",
   label = "Connect wallet",
+  variant = "default",
 }: {
   className?: string;
   size?: "default" | "lg";
   label?: string;
+  /** `outline` renders a secondary action (e.g. alongside email sign-in). */
+  variant?: "default" | "outline";
 }) {
   const [open, setOpen] = useState(false);
 
@@ -31,7 +34,8 @@ export function WalletConnectButton({
     <>
       <Button
         size={size}
-        className={cn(connectButtonClasses, className)}
+        variant={variant}
+        className={cn(variant === "default" && connectButtonClasses, className)}
         onClick={() => setOpen(true)}
       >
         <WalletIcon className="size-4" />

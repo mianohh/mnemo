@@ -9,9 +9,11 @@ import { isSuiAddress } from "./sui";
 export const SESSION_COOKIE = "mnemo_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const SIGNIN_MAX_AGE_MS = 5 * 60 * 1000;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_EMAIL_LENGTH = 254;
 
 let rpcClient: SuiGrpcClient | undefined;
-/** Server-side client — required to verify zkLogin signatures (remote JWK/epoch lookups). */
+/** Sui mainnet gRPC client — verifies every sign-in signature scheme. */
 function suiClient(): SuiGrpcClient {
   rpcClient ??= new SuiGrpcClient({
     network: "mainnet",
@@ -30,22 +32,42 @@ function signPayload(payload: string): string {
   return createHmac("sha256", secret()).update(payload).digest("base64url");
 }
 
-/** Session token: `<address>.<expiresAtMs>.<hmac>` — stateless, httpOnly cookie. */
-export function createSessionToken(address: string): string {
+export interface SessionClaims {
+  address: string;
+  /** Display-only identity echoed from the OAuth token (zkLogin sign-ins). */
+  email?: string;
+}
+
+/** Accept only plausible, bounded emails — the cookie is httpOnly and stateless. */
+export function normalizeEmail(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > MAX_EMAIL_LENGTH) return undefined;
+  return EMAIL_PATTERN.test(email) ? email : undefined;
+}
+
+/** Session token: `<address>.<expiresAtMs>[.<email>].<hmac>` — stateless, httpOnly cookie. */
+export function createSessionToken(address: string, email?: string): string {
   const expiresAt = Date.now() + SESSION_TTL_MS;
-  const payload = `${address.toLowerCase()}.${expiresAt}`;
+  const normalizedEmail = normalizeEmail(email);
+  const payload = `${address.toLowerCase()}.${expiresAt}${
+    normalizedEmail ? `.${normalizedEmail}` : ""
+  }`;
   return `${payload}.${signPayload(payload)}`;
 }
 
-export function readSessionToken(
+export function readSessionClaims(
   token: string | undefined | null
-): string | null {
+): SessionClaims | null {
   if (!token) return null;
   const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [address, expiresAtRaw, mac] = parts;
+  if (parts.length < 3) return null;
+  const mac = parts[parts.length - 1];
+  const payload = parts.slice(0, -1).join(".");
+  const segments = payload.split(".");
+  if (segments.length < 2) return null;
+  const [address, expiresAtRaw] = segments;
   if (!isSuiAddress(address)) return null;
-  const payload = `${address}.${expiresAtRaw}`;
   const expected = signPayload(payload);
   const a = Buffer.from(mac);
   const b = Buffer.from(expected);
@@ -53,7 +75,14 @@ export function readSessionToken(
   if (!/^\d+$/.test(expiresAtRaw) || Number(expiresAtRaw) < Date.now()) {
     return null;
   }
-  return address;
+  const email = segments.length > 2 ? normalizeEmail(segments.slice(2).join(".")) : undefined;
+  return email ? { address, email } : { address };
+}
+
+export function readSessionToken(
+  token: string | undefined | null
+): string | null {
+  return readSessionClaims(token)?.address ?? null;
 }
 
 /**
@@ -122,10 +151,9 @@ export async function verifySignIn(body: {
 
   // Verify against the raw challenge bytes first, then the BCS vector<u8>
   // form — some wallets sign the pre-wrapped message while echoing the raw
-  // bytes back in `message`. The client (SuiClient) enables zkLogin
-  // verification, which needs remote JWK/epoch lookups; passing the claimed
-  // address lets legacy zkLogin address derivations resolve and binds the
-  // session to exactly the address the wallet reported.
+  // bytes back in `message`. Passing the claimed address binds the session
+  // to exactly the address the wallet reported (and lets zkLogin wallets
+  // resolve their remote JWK state against mainnet).
   const candidates = [
     bytes,
     bcs.vector(bcs.u8()).serialize(bytes).toBytes(),

@@ -8,12 +8,15 @@ import {
 } from "@mysten/dapp-kit";
 import { addressNamespace, signinMessage } from "@/lib/sui";
 import { apiFetch } from "@/lib/api";
+import { beginZkLogin, clearZkLoginCache, completeZkLogin } from "@/lib/zklogin";
 
 const FORGET_KEY = "mnemo:forget";
 
 export interface Session {
   address: string;
   namespace: string;
+  /** Display-only identity from the OAuth token (zkLogin sign-ins). */
+  email?: string;
 }
 
 interface AuthState {
@@ -25,6 +28,13 @@ interface AuthState {
   signInError: string | null;
   /** Requires a connected wallet; creates the session cookie. */
   signIn: () => Promise<boolean>;
+  /**
+   * zkLogin email sign-in: starts the Google OAuth redirect (which does not
+   * resolve); the `/auth/callback` page finishes it.
+   */
+  signInWithGoogle: () => Promise<boolean>;
+  /** Completes the `/auth/callback` redirect and sets the session cookie. */
+  finishGoogleSignIn: (code: string, state: string) => Promise<boolean>;
   signOut: () => Promise<void>;
   forgetMode: boolean;
   setForgetMode: (value: boolean) => void;
@@ -150,7 +160,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void signIn();
   }, [account, session, sessionLoading, signingIn, signIn]);
 
+  const signInWithGoogle = React.useCallback(async (): Promise<boolean> => {
+    setSigningIn(true);
+    setSignInError(null);
+    try {
+      // Navigates to Google; the callback page finishes the sign-in.
+      await beginZkLogin();
+      return true;
+    } catch (e) {
+      setSignInError(e instanceof Error ? e.message : "Sign-in failed");
+      setSigningIn(false);
+      return false;
+    }
+  }, []);
+
+  const finishGoogleSignIn = React.useCallback(
+    async (code: string, state: string): Promise<boolean> => {
+      setSigningIn(true);
+      setSignInError(null);
+      try {
+        const identity = await completeZkLogin({ code, state });
+        setSession({
+          address: identity.address,
+          namespace: addressNamespace(identity.address),
+          email: identity.email,
+        });
+        return true;
+      } catch (e) {
+        setSignInError(e instanceof Error ? e.message : "Sign-in failed");
+        return false;
+      } finally {
+        setSigningIn(false);
+      }
+    },
+    []
+  );
+
   const signOut = React.useCallback(async () => {
+    clearZkLoginCache();
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
     } finally {
@@ -177,6 +224,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signingIn,
       signInError,
       signIn,
+      signInWithGoogle,
+      finishGoogleSignIn,
       signOut,
       forgetMode,
       setForgetMode,
@@ -187,6 +236,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signingIn,
       signInError,
       signIn,
+      signInWithGoogle,
+      finishGoogleSignIn,
       signOut,
       forgetMode,
       setForgetMode,

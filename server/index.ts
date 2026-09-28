@@ -3,6 +3,8 @@ import { Readable } from "node:stream";
 import { POST as authLogin } from "../src/app/api/auth/login/route";
 import { POST as authLogout } from "../src/app/api/auth/logout/route";
 import { GET as authSession } from "../src/app/api/auth/session/route";
+import { GET as zkLoginPrepare } from "../src/app/api/auth/zklogin/prepare/route";
+import { POST as zkLoginExchange } from "../src/app/api/auth/zklogin/exchange/route";
 import { POST as chatPost } from "../src/app/api/chat/route";
 import { GET as healthGet } from "../src/app/api/health/route";
 import { POST as mcpPost, GET as mcpGet, DELETE as mcpDelete } from "../src/app/api/mcp/route";
@@ -14,6 +16,8 @@ const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/auth/login": { POST: authLogin },
   "/api/auth/logout": { POST: authLogout },
   "/api/auth/session": { GET: authSession },
+  "/api/auth/zklogin/prepare": { GET: zkLoginPrepare },
+  "/api/auth/zklogin/exchange": { POST: zkLoginExchange },
   "/api/chat": { POST: chatPost },
   "/api/memory": { GET: memoryGet },
   "/api/health": { GET: healthGet },

@@ -25,6 +25,14 @@ export async function GET() {
     relayer,
     database: Boolean(process.env.DATABASE_URL) ? await pingDatabase() : false,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+    zkLogin: {
+      googleConfigured: Boolean(
+        process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ),
+      saltConfigured: Boolean(
+        process.env.ZKLOGIN_SALT_SECRET ?? process.env.SESSION_SECRET
+      ),
+    },
     time: new Date().toISOString(),
   });
 }

@@ -14,7 +14,7 @@ Most conversational interfaces operate with session-level amnesia. Every new con
 
 **Mnemo AI** addresses this limitation by functioning as an institutional continuity engine. Rather than storing unbounded, noisy chat transcripts, Mnemo employs a deterministic extraction and classification pipeline that identifies durable state primitives. These primitives are encrypted, anchored to Walrus Memory on Sui Mainnet, and semantically retrieved using vector similarity prior to every LLM generation.
 
-Context is cryptographically tied to the user's verified Sui wallet address, ensuring complete multi-tenant isolation, cross-device portability, and client-agnostic interoperability via the Model Context Protocol (MCP).
+Context is cryptographically tied to the user's verified Sui address — either a wallet signature or a Google sign-in mapped to a zkLogin-derived Sui address — ensuring complete multi-tenant isolation, cross-device portability, and client-agnostic interoperability via the Model Context Protocol (MCP).
 
 ---
 
@@ -56,7 +56,7 @@ flowchart TB
 
 | Dimension | Engineering Implementation |
 | :--- | :--- |
-| **Cryptographic Multi-Tenancy** | Authentication relies on Sui wallet personal-message challenge signatures verified server-side. The storage namespace is deterministically generated as `mnemo-user-{address}` from the verified signer. Clients cannot forge, switch, or inspect arbitrary namespaces. |
+| **Cryptographic Multi-Tenancy** | Authentication accepts two sign-in paths, both resolving to a verified Sui address: a wallet personal-message challenge, or **Sui zkLogin address derivation** ("Continue with email" — Google OIDC; the address is derived server-side from the verified JWT, no proving service). The storage namespace is deterministically generated as `mnemo-user-{address}` from the verified signer. Clients cannot forge, switch, or inspect arbitrary namespaces. |
 | **Categorical Fact Extraction** | Chat streams pass through a secondary evaluation stage using Google Gemini Flash and Zod schemas, filtering out conversational filler. Context is classified into four durable primitives: `project`, `constraint`, `decision`, or `preference`. |
 | **Deterministic Vector Retrieval** | Before generating responses, semantic search queries the user namespace with a relevance cutoff of ≥ 0.2. Context is dynamically prepended to the system prompt with strict grounding constraints to eliminate hallucinations. |
 | **Vector Index Lag Mitigation** | Asynchronous decentralized writes (encrypt → upload → index) can introduce short replication latencies. Mnemo detects pending writes against the local mirror and executes an exponential backoff retry loop during retrieval, preventing empty recalls. |
@@ -72,7 +72,7 @@ flowchart TB
 * **Styling & Presentation:** Tailwind CSS 4, shadcn/ui, `next-themes` (Dark/Light high-contrast support)
 * **Decentralized Memory Layer:** `@mysten-incubation/memwal` (Walrus Mainnet, Seal encryption, distributed vector index)
 * **Intelligence Engine:** Google Gemini Flash via Vercel AI SDK (`ai`, `@ai-sdk/react`)
-* **Identity & Authentication:** Sui Dapp-Kit (`@mysten/dapp-kit`), Ed25519 signature challenges, HMAC session cookies
+* **Identity & Authentication:** Sui Dapp-Kit (`@mysten/dapp-kit`) wallet challenges and **email sign-in** (Google OIDC Authorization Code + PKCE; the zkLogin address is derived server-side from the verified JWT — no ephemeral keypair, no proving service), HMAC session cookies
 * **Persistence & Caching:** PostgreSQL (Serverless-compatible `pg` pool) for mirror state
 * **Agent Interoperability:** Model Context Protocol (MCP) Streamable HTTP transport
 
@@ -88,9 +88,11 @@ flowchart TB
 | `GET` | `/api/mcp` | Bearer (MCP token) | `405` — clients must use `POST` |
 | `DELETE` | `/api/mcp` | Bearer (MCP token) | `200` acknowledgement (stateless endpoint) |
 | `POST` | `/api/auth/login` | — | Verifies the wallet challenge signature and sets the session cookie |
+| `GET` | `/api/auth/zklogin/prepare` | — | Returns the OAuth client id used to build the Google sign-in redirect |
+| `POST` | `/api/auth/zklogin/exchange` | — | Exchanges the OAuth code server-side, validates the JWT (`aud`/`iss`/`exp`), derives the zkLogin address from the HMAC salt, and sets the session cookie (the JWT never leaves the server) |
 | `POST` | `/api/auth/logout` | Session cookie | Clears the session cookie |
-| `GET` | `/api/auth/session` | Session cookie | Current address and namespace (`401` when signed out) |
-| `GET` | `/api/health` | — | Liveness: relayer status, database connectivity, LLM configuration |
+| `GET` | `/api/auth/session` | Session cookie | Current address, namespace and email (`401` when signed out) |
+| `GET` | `/api/health` | — | Liveness: relayer status, database connectivity, LLM configuration, zkLogin sign-in configuration |
 
 ### Conversational Endpoints
 
@@ -98,7 +100,7 @@ flowchart TB
 
 Streams assistant inference while retrieving and recording durable memory context.
 
-* **Authentication:** HttpOnly session cookie (authenticated Sui wallet).
+* **Authentication:** HttpOnly session cookie (Sui wallet or Google sign-in).
 * **Payload:** Vercel AI SDK `messages` array plus optional `forgetMode` flag (disables recall and saving for counterfactual runs).
 * **Response:** A UI-message stream. The `start`/`finish` parts carry message metadata (`memories`, `recallAttempts`, `namespace`, `memoryEnabled`) describing exactly which memories shaped the reply; a `data-savedFacts` part reports the durable facts extracted and queued for persistence.
 
@@ -202,13 +204,14 @@ The namespace is derived from the token's HMAC-verified Sui address, so tool arg
 
 ## Security Model
 
-1. **Namespace Non-Forgeability:** Memory namespaces are derived exclusively on the server side via cryptographic address recovery. Client-controlled payloads cannot access arbitrary namespaces — each user signs in with their own wallet, and memories are written to that wallet's namespace (see the [multi-tenant cookbook](https://docs.wal.app/walrus-memory/sdk/cookbook-multi-tenant)).
-2. **Ephemeral Caches:** The PostgreSQL mirror contains no custodial private keys or raw authentication credentials. Rotating `SESSION_SECRET` instantly revokes all active web sessions and MCP bearer tokens.
-3. **Decentralized Encryption:** Memory payloads dispatched to the Walrus relayer are protected by threshold encryption (Seal protocol) prior to blob distribution across storage nodes.
+1. **Namespace Non-Forgeability:** Memory namespaces are derived exclusively on the server side from the verified signer address. Client-controlled payloads cannot access arbitrary namespaces — each user signs in with their own wallet **or zkLogin identity**, and memories are written to that address's namespace (see the [multi-tenant cookbook](https://docs.wal.app/walrus-memory/sdk/cookbook-multi-tenant)).
+2. **Email Sign-In:** "Continue with email" uses Google OIDC (Authorization Code + PKCE). The OAuth code is exchanged server-side; the JWT, Google `aud`/`iss`/`exp` are validated on the server and the JWT never reaches the browser. The user's address is derived exactly as zkLogin specifies — `jwtToAddress(iss|aud|sub, HMAC-salt)` — and the session cookie is issued directly from that verified exchange, so **no proving service or allowlisted client ID is required**. Each user's salt is derived via HMAC from `ZKLOGIN_SALT_SECRET`, which is deliberately separate from `SESSION_SECRET` and **must never be rotated** — a different key would remap every email user to a fresh, empty namespace.
+3. **Ephemeral Caches:** The PostgreSQL mirror contains no custodial private keys or raw authentication credentials. Rotating `SESSION_SECRET` instantly revokes all active web sessions and MCP bearer tokens without affecting zkLogin address derivation.
+4. **Decentralized Encryption:** Memory payloads dispatched to the Walrus relayer are protected by threshold encryption (Seal protocol) prior to blob distribution across storage nodes.
 
 ```mermaid
 sequenceDiagram
-    participant U as User Wallet
+    participant U as User
     participant UI as Web Client
     participant API as Auth API
 
@@ -217,6 +220,25 @@ sequenceDiagram
     API->>API: Recover signer address, verify challenge
     API-->>UI: Set httpOnly HMAC session cookie, valid 7 days
     Note over API: Namespace derived server-side from verified address
+```
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant G as Google
+    participant UI as Web Client
+    participant API as Auth API
+
+    U->>UI: Continue with email
+    UI->>API: GET /api/auth/zklogin/prepare (OAuth client id)
+    UI->>G: OAuth redirect (PKCE + state)
+    G-->>UI: Redirect to /auth/callback with code + state
+    UI->>API: POST /api/auth/zklogin/exchange (code, PKCE verifier)
+    API->>G: Server-side code exchange → JWT (aud/iss/exp checked)
+    API->>API: salt = HMAC(ZKLOGIN_SALT_SECRET, iss|aud|sub)
+    API->>API: address = jwtToAddress(jwt, salt)
+    API-->>UI: address + email, Set httpOnly HMAC session cookie
+    Note over API: JWT discarded server-side — same derivation as zkLogin, no prover
 ```
 
 ---

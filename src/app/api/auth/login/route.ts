@@ -3,8 +3,9 @@ import { sessionSetCookie } from "@/lib/http";
 
 export const runtime = "nodejs";
 
+/** Wallet sign-in: verify the challenge signature and set the session cookie. */
 export async function POST(req: Request) {
-  let body: { message?: unknown; signature?: unknown };
+  let body: { message?: unknown; signature?: unknown; address?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -18,6 +19,10 @@ export async function POST(req: Request) {
 
   return Response.json(
     { address: result.address },
-    { headers: { "Set-Cookie": sessionSetCookie(createSessionToken(result.address)) } }
+    {
+      headers: {
+        "Set-Cookie": sessionSetCookie(createSessionToken(result.address)),
+      },
+    }
   );
 }

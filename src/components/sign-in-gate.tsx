@@ -4,6 +4,7 @@ import { useCurrentAccount } from "@mysten/dapp-kit";
 import {
   BrainCircuitIcon,
   LockIcon,
+  MailIcon,
   SearchIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -31,7 +32,7 @@ const FEATURES = [
   {
     icon: <ShieldCheckIcon className="size-4" />,
     title: "Onchain & portable",
-    text: "Encrypted on Walrus, keyed to your wallet address — verify it any time with a live relayer cross-check.",
+    text: "Encrypted on Walrus, keyed to your sign-in address — verify it any time with a live relayer cross-check.",
   },
 ] as const;
 
@@ -46,7 +47,7 @@ export function SignInGate({
   title?: string;
   blurb?: string;
 }) {
-  const { signIn, signingIn, signInError } = useAuth();
+  const { signIn, signInWithGoogle, signingIn, signInError } = useAuth();
   const account = useCurrentAccount();
 
   return (
@@ -61,7 +62,7 @@ export function SignInGate({
       <div className="relative mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-4 py-16 text-center sm:py-24">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-600/30 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
           <LockIcon className="size-3" />
-          Decentralized memory on Walrus — your key, your namespace
+          Decentralized memory on Walrus — your identity, your namespace
         </span>
 
         <div className="flex flex-col items-center gap-3">
@@ -76,20 +77,45 @@ export function SignInGate({
           </p>
         </div>
 
-        {account ? (
+        <div className="flex flex-col items-center gap-2">
           <Button
             className={cn(connectButtonClasses, "h-12 px-7 text-base")}
+            onClick={() => void signInWithGoogle()}
+            disabled={signingIn}
+          >
+            <MailIcon className="size-4" />
+            {signingIn ? "Signing you in…" : "Continue with email"}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Uses your Google account — no wallet, no password.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="h-px w-14 bg-border" />
+          or use a wallet
+          <span className="h-px w-14 bg-border" />
+        </div>
+
+        {account ? (
+          <Button
+            variant="outline"
+            className="h-11 px-6"
             onClick={() => void signIn()}
             disabled={signingIn}
           >
             <WalletIcon className="size-4" />
-            {signingIn ? "Check your wallet…" : "Sign in"}
+            {signingIn ? "Check your wallet…" : "Sign in with wallet"}
           </Button>
         ) : (
-          <WalletConnectButton className="h-12 px-7 text-base" />
+          <WalletConnectButton
+            variant="outline"
+            className="h-11 px-6"
+            label="Connect wallet"
+          />
         )}
         {signInError && (
-          <p className="-mt-4 max-w-md text-xs text-destructive">{signInError}</p>
+          <p className="-mt-3 max-w-md text-xs text-destructive">{signInError}</p>
         )}
 
         <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
@@ -110,8 +136,9 @@ export function SignInGate({
         </div>
 
         <p className="text-[11px] text-muted-foreground">
-          Works with Sui Wallet, Nightly, Ethos, Phantom (Sui) and other Sui
-          wallets. One signature — no passwords, no email.
+          Email sign-in maps your Google account to a unique Sui address — the
+          Google token is verified server-side and never reaches the browser.
+          Wallet users: Sui Wallet, Nightly, Ethos, Phantom (Sui) and more.
         </p>
       </div>
     </section>
