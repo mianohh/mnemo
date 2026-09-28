@@ -1,27 +1,14 @@
-<p align="center">
-  <img src="public/banner.svg" alt="Mnemo AI — Verifiable Personal Continuity Agent Powered by Walrus Memory on Sui Mainnet" width="100%">
-</p>
+# Mnemo AI
 
-<p align="center">
-  <img src="https://img.shields.io/badge/License-MIT-4DA2FF?style=flat-square" alt="License: MIT">
-  <img src="https://img.shields.io/badge/Node-%E2%89%A524-339933?style=flat-square" alt="Node.js 24 or later">
-  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square" alt="TypeScript 5">
-  <img src="https://img.shields.io/badge/Next.js-16-000000?style=flat-square" alt="Next.js 16">
-  <img src="https://img.shields.io/badge/Sui-Mainnet-4DA2FF?style=flat-square" alt="Sui Mainnet">
-</p>
+**Verifiable Personal Continuity Agent Powered by Walrus Memory on Sui Mainnet**
 
-<p align="center">
-  <a href="#system-architecture">Architecture</a> ·
-  <a href="#core-capabilities">Core Capabilities</a> ·
-  <a href="#getting-started">Quickstart</a> ·
-  <a href="#model-context-protocol-mcp">MCP Server</a> ·
-  <a href="#api-reference">API Reference</a> ·
-  <a href="#deployment">Deployment</a>
-</p>
+*An autonomous AI continuity agent that retains durable facts—projects, constraints, architectural decisions, and personal preferences—persisted to decentralized storage and semantically recalled across sessions, clients, and devices.*
+
+[Architecture](#system-architecture) • [Core Capabilities](#core-capabilities) • [Quickstart](#getting-started) • [MCP Server](#model-context-protocol-mcp) • [API Reference](#api-reference) • [Deployment](#deployment)
 
 ---
 
-## Executive Summary
+## Summary
 
 Most conversational interfaces operate with session-level amnesia. Every new conversation forces users to re-establish architectural constraints, historical decisions, and working contexts.
 
@@ -88,124 +75,6 @@ flowchart TB
 * **Identity & Authentication:** Sui Dapp-Kit (`@mysten/dapp-kit`), Ed25519 signature challenges, HMAC session cookies
 * **Persistence & Caching:** PostgreSQL (Serverless-compatible `pg` pool) for mirror state
 * **Agent Interoperability:** Model Context Protocol (MCP) Streamable HTTP transport
-
----
-
-## Getting Started
-
-### Prerequisites
-
-* **Node.js:** `v24.0.0` or higher
-* **PostgreSQL:** Neon Serverless, Supabase, or standard local instance (used solely for UI mirror performance)
-* **Walrus Memory Credentials:** Account ID and Ed25519 delegate key provisioned via [Walrus Memory Portal](https://memory.walrus.xyz)
-* **Gemini API Key:** Obtained from [Google AI Studio](https://aistudio.google.com/apikey)
-
-### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/mianohh/mnemo.git
-   cd mnemo
-   ```
-
-2. **Install project dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Configure environment settings:**
-   ```bash
-   cp .env.example .env
-   ```
-
-4. **Add your credentials to `.env`:**
-   Fill in the [required variables](#configuration-reference) — at minimum `DATABASE_URL`, `SESSION_SECRET`, and `GEMINI_API_KEY`. The database schema is created automatically the first time the app touches the database.
-
-5. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
-   Chat is served at `http://localhost:3000` and the memory dashboard at `http://localhost:3000/memory`. Sign in with any Sui wallet.
-
-   To exercise the split-deploy path locally, run the API in a second terminal and point the frontend at it:
-   ```bash
-   npm run dev:api
-   NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
-   ```
-   Leave `NEXT_PUBLIC_API_URL` empty to keep everything same-origin (the default).
-
----
-
-## Configuration Reference
-
-| Environment Variable | Requirement | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `DATABASE_URL` | **Required** | — | PostgreSQL connection string for the UI dashboard mirror. |
-| `SESSION_SECRET` | **Required** | — | 32-byte hex secret (`openssl rand -hex 32`) for HMAC session cookies and MCP bearer tokens. |
-| `GEMINI_API_KEY` | **Required** | — | Google AI Studio key powering chat inference and structured extraction. |
-| `MEMWAL_PRIVATE_KEY` | Required (production) | — | Ed25519 delegate private key (hex) authorized on Walrus Memory. |
-| `MEMWAL_ACCOUNT_ID` | Required (production) | — | Sui Object ID (`0x…`) referencing the active `MemWalAccount`. |
-| `MEMWAL_SERVER_URL` | Optional | `https://relayer.memory.walrus.xyz` | Endpoint for the Walrus Memory relayer service. |
-| `MEMWAL_NETWORK` | Optional | `mainnet` | Target deployment environment (`mainnet` \| `testnet`). |
-| `MEMWAL_MIN_RELEVANCE` | Optional | `0.2` | Semantic cosine similarity threshold for vector retrieval. |
-| `GEMINI_MODEL` | Optional | `gemini-flash-lite-latest` | Gemini model variant used for generation and classification. |
-| `NEXT_PUBLIC_SUI_RPC_URL` | Optional | *Public Mainnet* | Sui JSON-RPC endpoint for client-side wallet signatures. |
-| `NEXT_PUBLIC_API_URL` | Required (split deploy) | *(same origin)* | Absolute URL of the Render API — set on Vercel only. |
-| `CORS_ORIGINS` | Required (Render) | — | Comma-separated frontend origins allowed to call the API. |
-
-> **Note:** If `MEMWAL_*` credentials are not supplied, Mnemo initializes in development sandbox mode. Memory capabilities gracefully deactivate, and the UI status reports `memwal: unconfigured`.
-
----
-
-## Repository Structure
-
-```text
-src/
-├── app/
-│   ├── layout.tsx                    # Root layout, theme and wallet providers
-│   ├── page.tsx                      # Primary chat interface & counterfactual switch
-│   ├── memory/page.tsx               # Context timeline, category filters, and state auditor
-│   ├── api/chat/route.ts             # Execution pipeline: Recall → Stream → Extract → Persist
-│   ├── api/memory/route.ts           # Mirror retrieval, relayer cross-check, MCP tokens
-│   ├── api/mcp/route.ts              # Stateless Streamable HTTP MCP server handler
-│   ├── api/auth/login/route.ts       # Sui signature validation & session minting
-│   ├── api/auth/logout/route.ts      # Session destruction
-│   ├── api/auth/session/route.ts     # Active namespace and wallet introspection
-│   └── api/health/route.ts           # Infrastructure health probe (relayer, DB, LLM)
-├── components/
-│   ├── chat/
-│   │   ├── chat-client.tsx           # Chat runtime, toast dispatch, memory toggles
-│   │   └── memory-indicator.tsx      # Interactive recall chip & provenance popover
-│   ├── memory/memory-dashboard.tsx   # State visualization, category distributions
-│   ├── auth-context.tsx              # Session state, sign-in/out, forget mode
-│   ├── sign-in-gate.tsx              # Landing hero shown while signed out
-│   ├── site-header.tsx               # Wallet connector, session status, theme controls
-│   ├── theme-provider.tsx            # next-themes (light/dark/system)
-│   ├── theme-toggle.tsx              # Theme switch control
-│   ├── wallet-connect-button.tsx     # Connect / sign-in control
-│   ├── wallet-providers.tsx          # Sui Dapp-Kit provider configuration
-│   └── ui/                           # shadcn/ui primitives
-└── lib/
-    ├── sui.ts                        # Address manipulation and namespace derivation
-    ├── sui-auth.ts                   # Cryptographic verification and token signing
-    ├── mcp.ts                        # MCP server tool definitions and execution
-    ├── chat-types.ts                 # UIMessage metadata and data-part types
-    ├── llm.ts                        # Gemini client configuration
-    ├── api.ts                        # Backend base URL and credentialed fetch helper
-    ├── http.ts                       # Request cookie parsing and session cookie helpers
-    ├── memory/
-    │   ├── client.ts                 # MemWal singleton client wrapper
-    │   ├── recall.ts                 # Semantic search and backoff retry logic
-    │   ├── save.ts                   # Asynchronous bulk persistence and mirror sync
-    │   ├── extract.ts                # Zod-based categorical fact extraction
-    │   ├── prompt.ts                 # Memory-grounded system prompts
-    │   ├── store.ts                  # Connection pool for PostgreSQL mirror
-    │   └── types.ts                  # Shared memory-layer types
-    └── utils.ts                      # Shared helper utilities
-server/
-└── index.ts                          # Standalone API server (Render entry point)
-render.yaml                           # Render service blueprint
-```
 
 ---
 
@@ -349,96 +218,6 @@ sequenceDiagram
     API-->>UI: Set httpOnly HMAC session cookie, valid 7 days
     Note over API: Namespace derived server-side from verified address
 ```
-
----
-
-## Deployment
-
-The API runs as a standalone Node server on **Render**; the Next.js frontend runs on **Vercel** and calls the API cross-origin.
-
-```mermaid
-flowchart LR
-    git["git push to main"] --> vercel["Vercel<br/>next build (frontend)"]
-    git --> render["Render<br/>npm run start:api"]
-    vercel -->|NEXT_PUBLIC_API_URL| render
-    render --> relayer["Walrus Memory relayer<br/>Sui Mainnet"]
-```
-
-### 1. Push the repository
-
-```bash
-git branch -M main
-git remote add origin https://github.com/mianohh/mnemo.git
-git push -u origin main
-```
-
-### 2. Backend on Render
-
-1. [render.com/new](https://render.com/new) → **Blueprint** → import the repository; `render.yaml` defines the service (`npm ci` → `npm run start:api`, health check `/api/health`).
-2. Set the secrets in the service dashboard (marked *sync: false* in `render.yaml`):
-
-   | Variable | Value |
-   | --- | --- |
-   | `SESSION_SECRET` | `openssl rand -hex 32` — generate once and never rotate |
-   | `DATABASE_URL` | Postgres connection string (e.g. Neon) |
-   | `GEMINI_API_KEY` | Google AI Studio key |
-   | `MEMWAL_PRIVATE_KEY` / `MEMWAL_ACCOUNT_ID` | Walrus Memory delegate key and account ID |
-   | `CORS_ORIGINS` | Your Vercel URL, e.g. `https://mnemo.vercel.app` |
-
-3. Deploy — `https://<service>.onrender.com/api/health` returns `{"ok":true,…}`.
-
-### 3. Frontend on Vercel
-
-1. [vercel.com/new](https://vercel.com/new) — import the repository. The framework is detected automatically (**Next.js**, build command `next build`).
-2. Project → **Settings → Environment Variables**:
-
-   | Variable | Value |
-   | --- | --- |
-   | `NEXT_PUBLIC_API_URL` | `https://<service>.onrender.com` |
-   | `NEXT_PUBLIC_SUI_RPC_URL` | optional — defaults to the public mainnet fullnode |
-
-3. Deploy by pushing to `main`, or from **Deployments → Redeploy**. After the first deploy, add the final Vercel domain to `CORS_ORIGINS` on Render if it differs from the placeholder.
-
-### 4. Post-deploy verification
-
-1. `https://<service>.onrender.com/api/health` returns `{"ok":true,…,"database":true,…}`.
-2. Open the Vercel URL, connect a wallet and sign the challenge (the session cookie is valid for seven days).
-3. State a durable fact — e.g. *"I prefer bullet points over paragraphs"* — and wait for the **New context anchored to Mainnet** toast.
-4. Ask *"What do you remember about me?"* — the `[N] memories applied` chip lists the recalled fact with its relevance score.
-5. Refresh `/memory`: the new row transitions `pending → done` with its blob ID, and the badge reads **mirror matches the relayer ✓** to confirm onchain parity.
-6. Copy the MCP endpoint and bearer token from the **Connect any AI agent — MCP** card, connect an MCP client, and call `mnemo_health`, `mnemo_remember`, and `mnemo_recall`.
-
-### Troubleshooting
-
-| Symptom | Fix |
-| --- | --- |
-| Browser console shows blocked CORS / `Origin not allowed` | `CORS_ORIGINS` on Render does not include the exact Vercel origin (scheme + host, no trailing slash) |
-| Sign-in succeeds but `/api/memory` and chat return `401` | The session cookie was rejected — confirm both platforms serve HTTPS and `SESSION_SECRET` matches |
-| `/memory` errors or counts stay at 0 | `DATABASE_URL` is missing or unreachable on Render — check the service environment |
-| `memwal: unconfigured` | `MEMWAL_PRIVATE_KEY` / `MEMWAL_ACCOUNT_ID` are not set |
-| MCP `401` | The token was issued for a different `SESSION_SECRET` — copy a fresh token from `/memory` |
-| Wallet sign-in returns `401` | The Render logs contain `[mnemo] verifySignIn failed {…}` with the detected signature scheme |
-
----
-
-## Design Notes: Manual `recall()` instead of `withMemWal()`
-
-Walrus ships a drop-in middleware (`withMemWal`) that recalls before generation and saves afterwards. Mnemo performs both steps explicitly in order to:
-
-1. **Show its work** — the UI needs the list of applied memories, which the middleware does not expose.
-2. **Categorize before storing** — facts are grouped by type in the dashboard.
-3. **Retry on index lag** — the UI reports when the vector index has not yet caught up.
-
-The same primitives are used (`recall`, `rememberBulk`, `waitForRememberJob`) in approximately forty additional lines: see `src/lib/memory/`.
-
----
-
-## Limitations
-
-* **No deletion:** The Walrus Memory SDK exposes no delete API (neither per fact nor per namespace). `mnemo_remember` writes are permanent; a corrected fact is stored as a new memory, and the system prompt instructs the model to trust the user's most recent statement.
-* **Conservative extraction:** At most three facts are extracted per conversational turn and only if they pass the durability filter — small talk and ephemeral details are deliberately dropped.
-* **Eventual settlement:** `remember()` returns immediately; the mirror row shows `pending` until the encrypt → upload → index job settles (typically seconds). Recall compensates with backoff retries during that window, so counts and chips can lag the write by a few seconds.
-* **Memory requires credentials:** Without `MEMWAL_*` variables the application runs in sandbox mode with memory disabled and the dashboard reports `memwal: unconfigured`.
 
 ---
 
