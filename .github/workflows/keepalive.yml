@@ -1,0 +1,25 @@
+name: keep-alive
+
+# The API runs on a free-tier Render instance that sleeps after ~15 min of
+# inactivity; waking it is what made the homepage feel broken in new
+# browsers. Pinging /api/health every 5 min keeps it warm. GitHub's
+# schedule can drift a few minutes, hence the 5-min cadence.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Wake the API
+        env:
+          API_URL: ${{ vars.MNEMO_API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::error::Set the repository variable MNEMO_API_URL (e.g. https://mnemo-api.onrender.com) — Settings ▸ Secrets and variables ▸ Actions ▸ Variables."
+            exit 1
+          fi
+          curl -fsS --max-time 60 "${API_URL%/}/api/health" > /dev/null

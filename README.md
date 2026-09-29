@@ -1,10 +1,14 @@
+<p align="center">
+  <img src="public/brand/readme-banner.png" alt="Mnemo — a chatbot that remembers you. Verifiable personal continuity on Walrus Memory, Sui Mainnet." width="100%">
+</p>
+
 # Mnemo AI
 
 **Verifiable Personal Continuity Agent Powered by Walrus Memory on Sui Mainnet**
 
 *An autonomous AI continuity agent that retains durable facts—projects, constraints, architectural decisions, and personal preferences—persisted to decentralized storage and semantically recalled across sessions, clients, and devices.*
 
-[Architecture](#system-architecture) • [Core Capabilities](#core-capabilities) • [Quickstart](#getting-started) • [MCP Server](#model-context-protocol-mcp) • [API Reference](#api-reference) • [Deployment](#deployment)
+[Architecture](#system-architecture) • [Core Capabilities](#core-capabilities) • [Getting Started](#getting-started) • [MCP Server](#model-context-protocol-mcp) • [API Reference](#api-reference) • [Deployment](#deployment)
 
 ---
 
@@ -75,6 +79,37 @@ flowchart TB
 * **Identity & Authentication:** Sui Dapp-Kit (`@mysten/dapp-kit`) wallet challenges and **email sign-in** (Google OIDC Authorization Code + PKCE; the zkLogin address is derived server-side from the verified JWT — no ephemeral keypair, no proving service), HMAC session cookies
 * **Persistence & Caching:** PostgreSQL (Serverless-compatible `pg` pool) for mirror state
 * **Agent Interoperability:** Model Context Protocol (MCP) Streamable HTTP transport
+
+---
+
+## Getting Started
+
+**Requirements:** Node ≥ 24 and a Postgres database (the mirror schema is created automatically on first write).
+
+```bash
+npm install
+cp .env.example .env    # then fill in the values below
+npm run dev             # http://localhost:3000 — serves the app and the API routes (same origin)
+```
+
+Minimum `.env` to sign in and chat:
+
+| Variable | Purpose |
+| :--- | :--- |
+| `SESSION_SECRET` | Signs session cookies and MCP tokens — `openssl rand -hex 32` |
+| `ZKLOGIN_SALT_SECRET` | Derives email sign-in addresses — `openssl rand -hex 32`, **never rotate** |
+| `GEMINI_API_KEY` | Gemini Flash generation + fact extraction (free tier via Google AI Studio) |
+| `DATABASE_URL` | Postgres URL, e.g. `postgres://mnemo@127.0.0.1:5433/mnemo` |
+
+Optional: `MEMWAL_PRIVATE_KEY` + `MEMWAL_ACCOUNT_ID` (Walrus Memory indexing — without them chat still works and the dashboard reports `off`), `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` ("Continue with email" — wallet sign-in works without them).
+
+Local Postgres, if you don't have one:
+
+```bash
+docker run -d --name mnemo-pg -p 5433:5433 -e POSTGRES_USER=mnemo -e POSTGRES_DB=mnemo postgres:17
+```
+
+`npm run dev:api` starts the standalone API server (`server/index.ts`, port 4000) — the same route handlers behind a bare HTTP server, used by the split deployment on Render. Local development doesn't need it.
 
 ---
 
@@ -240,6 +275,37 @@ sequenceDiagram
     API-->>UI: address + email, Set httpOnly HMAC session cookie
     Note over API: JWT discarded server-side — same derivation as zkLogin, no prover
 ```
+
+---
+
+## Deployment
+
+Split deployment: **frontend on Vercel**, **API on Render** (`render.yaml`, free plan).
+
+### 1. Render (API)
+
+* `render.yaml` defines the service: `npm ci` → `npm run start:api`, health check path `/api/health`.
+* Set every `sync: false` env var in the Render dashboard (see `.env.example`).
+* `CORS_ORIGINS` must contain the **exact** frontend origin (e.g. `https://your-app.vercel.app`) — the session cookie is sent cross-origin with `credentials: include`, so the API rejects other origins.
+
+### 2. Vercel (frontend)
+
+* `NEXT_PUBLIC_API_URL=https://<service-name>.onrender.com` — baked at build time, so set it before (or re-deploy after) the first deploy.
+* Optional: `NEXT_PUBLIC_SUI_RPC_URL` to override the default Sui fullnode.
+* The Vercel deployment needs **no** database, Gemini, Walrus, or Google secrets — everything sensitive lives on the API.
+
+### 3. Keep the API awake (free tier)
+
+Free Render instances sleep after ~15 minutes of inactivity; the first request then waits 30–60 s for the process to boot.
+
+* `.github/workflows/keepalive.yml` pings `GET /api/health` every 5 minutes, which keeps the instance warm (an in-process cache still requires a boot to serve, so the ping genuinely wakes a slept instance).
+* One-time setup: repository **Settings ▸ Secrets and variables ▸ Actions ▸ Variables** → add `MNEMO_API_URL = https://<service-name>.onrender.com`.
+* The homepage already never blocks on the API: the landing paints immediately, session and health checks run in parallel, and the health band shows a "waking up" state with a retry button. Chat and `/memory` still need the API for data.
+* Alternative to pings: upgrade Render to an always-on instance ($7/mo).
+
+### 4. Health endpoint
+
+`GET /api/health` runs the relayer and database checks concurrently with a 2.5 s budget each and memoizes the response for 15 s, so a cold wake serves every waiting probe (landing, Render's health check, the keep-alive cron) from a single build.
 
 ---
 
