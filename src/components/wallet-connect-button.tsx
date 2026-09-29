@@ -14,17 +14,20 @@ import {
 import { cn } from "@/lib/utils";
 
 export const connectButtonClasses =
-  "bg-emerald-600 font-semibold text-white shadow-sm hover:bg-emerald-700 focus-visible:ring-emerald-600/40";
+  "bg-mint font-semibold text-mint-on shadow-sm hover:bg-mint-strong focus-visible:ring-mint-strong/50";
 
 export function WalletConnectButton({
   className,
   size = "lg",
   label = "Connect wallet",
+  shortLabel,
   variant = "default",
 }: {
   className?: string;
   size?: "default" | "lg";
   label?: string;
+  /** Rendered instead of `label` below the `sm` breakpoint. */
+  shortLabel?: string;
   /** `outline` renders a secondary action (e.g. alongside email sign-in). */
   variant?: "default" | "outline";
 }) {
@@ -39,7 +42,14 @@ export function WalletConnectButton({
         onClick={() => setOpen(true)}
       >
         <WalletIcon className="size-4" />
-        {label}
+        {shortLabel ? (
+          <>
+            <span className="sm:hidden">{shortLabel}</span>
+            <span className="hidden sm:inline">{label}</span>
+          </>
+        ) : (
+          label
+        )}
       </Button>
       <ConnectDialog open={open} onOpenChange={setOpen} />
     </>

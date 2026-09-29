@@ -25,7 +25,7 @@ function SuspenseShell({ children }: { children: React.ReactNode }) {
     <React.Suspense
       fallback={
         <CallbackStatus>
-          <LoaderCircleIcon className="size-6 animate-spin text-emerald-600" />
+          <LoaderCircleIcon className="size-6 animate-spin text-mint-ink" />
           <h1 className="text-lg font-semibold">Finishing sign-in…</h1>
           <p className="text-sm text-muted-foreground">
             Verifying your Google account…
@@ -78,7 +78,7 @@ function CallbackFlow() {
         <Link href="/">
           <Button
             size="lg"
-            className="bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+            className="bg-mint font-semibold text-mint-on hover:bg-mint-strong"
           >
             Try again
           </Button>
@@ -89,7 +89,7 @@ function CallbackFlow() {
 
   return (
     <CallbackStatus>
-      <LoaderCircleIcon className="size-6 animate-spin text-emerald-600" />
+      <LoaderCircleIcon className="size-6 animate-spin text-mint-ink" />
       <h1 className="text-lg font-semibold">Finishing sign-in…</h1>
       <p className="text-sm text-muted-foreground">
         Verifying your Google account…
@@ -101,7 +101,7 @@ function CallbackFlow() {
 function CallbackStatus({ children }: { children: React.ReactNode }) {
   return (
     <section className="mx-auto flex min-h-[70vh] w-full max-w-md flex-col items-center justify-center gap-6 px-4 text-center">
-      <span className="flex size-14 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/20">
+      <span className="flex size-14 items-center justify-center rounded-2xl bg-mint text-mint-on shadow-md">
         <BrainCircuitIcon className="size-7" />
       </span>
       {children}

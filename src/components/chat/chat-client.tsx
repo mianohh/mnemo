@@ -4,15 +4,10 @@ import * as React from "react";
 import { toast } from "sonner";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  ArrowUpIcon,
-  BrainCircuitIcon,
-  BrainIcon,
-  RotateCcwIcon,
-  SparklesIcon,
-} from "lucide-react";
+import { ArrowUpIcon, BrainIcon, RotateCcwIcon, SparklesIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { MemoryIndicator } from "@/components/chat/memory-indicator";
@@ -83,13 +78,16 @@ function ChatPanel({
           part.id ?? `${message.id}:${part.data.facts[0]?.text ?? ""}`;
         if (seenToasts.current.has(key)) continue;
         seenToasts.current.add(key);
-        toast(part.data.network === "testnet"
-          ? "New context anchored to Testnet"
-          : "New context anchored to Mainnet", {
-          description: part.data.facts
-            .map((f) => `${f.category}: ${f.text}`)
-            .join(" · "),
-        });
+        toast(
+          part.data.network === "testnet"
+            ? "New context anchored to Testnet"
+            : "New context anchored to Mainnet",
+          {
+            description: part.data.facts
+              .map((f) => `${f.category}: ${f.text}`)
+              .join(" · "),
+          }
+        );
       }
     }
   }, [messages]);
@@ -105,10 +103,7 @@ function ChatPanel({
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || busy) return;
-      void sendMessage(
-        { text: trimmed },
-        { body: { forgetMode } }
-      );
+      void sendMessage({ text: trimmed }, { body: { forgetMode } });
       setInput("");
     },
     [busy, sendMessage, forgetMode]
@@ -117,16 +112,23 @@ function ChatPanel({
   return (
     <div className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-3xl flex-col">
       {/* Context bar */}
-      <div className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3 border-b border-border/70 bg-background/80 px-4 py-2.5 backdrop-blur">
         <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate font-mono">{namespace}</span>
-          <span className="hidden rounded-full border border-border px-2 py-0.5 sm:inline">
+          <span className="truncate rounded-full border border-border bg-card px-2 py-0.5 font-mono text-[11px]">
+            {namespace}
+          </span>
+          <span className="hidden whitespace-nowrap rounded-full border border-border px-2 py-0.5 font-mono text-[11px] sm:inline">
             gemini-flash-lite-latest
           </span>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
-          <span className={cn(forgetMode ? "text-amber-600" : "text-emerald-600")}>
-            {forgetMode ? "Memory OFF" : "Memory ON"}
+        <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
+          <span
+            className={cn(
+              "pixel-font whitespace-nowrap text-[10px] tracking-wider",
+              forgetMode ? "text-amber-600 dark:text-amber-400" : "text-mint-ink"
+            )}
+          >
+            {forgetMode ? "MEMORY OFF" : "MEMORY ON"}
           </span>
           <Switch
             checked={!forgetMode}
@@ -136,25 +138,38 @@ function ChatPanel({
         </label>
       </div>
       {forgetMode && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-center text-xs text-amber-800">
+        <div className="border-b border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-center text-xs text-amber-700 dark:text-amber-300">
           Forget mode: the bot has no memory of you — this is the “before”
           experience.
         </div>
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="scroll-area pixel-grid flex-1 overflow-y-auto"
+      >
         <div className="flex flex-col gap-6 px-4 py-6">
           {messages.length === 0 && (
-            <div className="mt-8 flex flex-col items-center gap-6 text-center">
-              <span className="flex size-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/20">
-                <BrainCircuitIcon className="size-6" />
+            <div className="mt-6 flex flex-col items-center gap-6 text-center">
+              <span className="flex size-24 items-center justify-center overflow-hidden rounded-3xl border-2 border-ink bg-mint p-2 shadow-[4px_4px_0_0_var(--ink)] dark:border-mint/40 dark:shadow-none">
+                <Image
+                  src="/brand/walrus-mascot.png"
+                  alt=""
+                  width={96}
+                  height={120}
+                  className="h-20 w-auto"
+                  priority
+                />
               </span>
               <div>
-                <h1 className="text-lg font-semibold tracking-tight">
+                <p className="pixel-font text-[11px] uppercase tracking-[0.25em] text-mint-ink">
+                  Walrus Memory connected
+                </p>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight">
                   I remember you.
                 </h1>
-                <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
                   Mnemo stores what matters about you on Walrus Memory — your
                   projects, constraints, decisions, and preferences — and
                   recalls it in future sessions.
@@ -165,9 +180,9 @@ function ChatPanel({
                   <button
                     key={s}
                     onClick={() => submit(s)}
-                    className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-left text-sm shadow-xs transition-colors hover:border-emerald-500/40 hover:bg-emerald-50 dark:hover:bg-emerald-500/10"
+                    className="sticker-sm flex items-center gap-2 rounded-xl bg-card px-3.5 py-3 text-left text-sm transition-colors hover:bg-mint/50"
                   >
-                    <SparklesIcon className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <SparklesIcon className="size-3.5 shrink-0 text-mint-ink" />
                     {s}
                   </button>
                 ))}
@@ -187,7 +202,7 @@ function ChatPanel({
               return (
                 <div key={message.id} className="flex items-start gap-3">
                   <Avatar />
-                  <div className="text-sm text-muted-foreground">
+                  <div className="pt-1.5 text-sm text-muted-foreground">
                     Mnemo is thinking…
                   </div>
                 </div>
@@ -197,8 +212,10 @@ function ChatPanel({
             if (isUser) {
               return (
                 <div key={message.id} className="flex justify-end">
-                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-foreground px-3.5 py-2 text-sm text-background">
-                    <div className="whitespace-pre-wrap break-words">{text}</div>
+                  <div className="max-w-[85%] rounded-2xl rounded-br-md bg-mint px-3.5 py-2 text-sm text-mint-on">
+                    <div className="whitespace-pre-wrap break-words">
+                      {text}
+                    </div>
                   </div>
                 </div>
               );
@@ -224,8 +241,8 @@ function ChatPanel({
                     </ReactMarkdown>
                   </div>
                   {savedPart && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-                    <BrainIcon className="size-3" />
+                    <div className="mint-chip mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium">
+                      <BrainIcon className="size-3" />
                       {savedPart.data.facts.length} new{" "}
                       {savedPart.data.facts.length === 1 ? "fact" : "facts"}{" "}
                       saved to {savedPart.data.network}
@@ -239,7 +256,7 @@ function ChatPanel({
           {status === "streaming" && messages.length > 0 && (
             <div className="flex items-center gap-3">
               <Avatar />
-              <div className="flex gap-1">
+              <div className="flex gap-1.5">
                 <Dot />
                 <Dot delay={150} />
                 <Dot delay={300} />
@@ -248,7 +265,7 @@ function ChatPanel({
           )}
 
           {error && (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               <span className="truncate">{error.message}</span>
               <Button
                 size="sm"
@@ -273,7 +290,7 @@ function ChatPanel({
             e.preventDefault();
             submit(input);
           }}
-          className="flex items-end gap-2 rounded-xl border border-border bg-card p-2 shadow-xs focus-within:border-emerald-500/50 focus-within:ring-2 focus-within:ring-emerald-600/40"
+          className="flex items-end gap-2 rounded-2xl border-2 border-ink/90 bg-card p-2 shadow-[3px_3px_0_0_var(--ink)] transition-colors focus-within:border-mint-strong dark:border-mint/30 dark:shadow-none dark:focus-within:border-mint-strong"
         >
           <textarea
             value={input}
@@ -295,7 +312,7 @@ function ChatPanel({
           <Button
             type="submit"
             size="icon"
-            className="size-8 shrink-0 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-600/40"
+            className="size-9 shrink-0 rounded-xl bg-mint text-mint-on hover:bg-mint-strong focus-visible:ring-mint-strong/50 sm:size-8"
             disabled={busy || !input.trim()}
             aria-label="Send"
           >
@@ -303,7 +320,7 @@ function ChatPanel({
           </Button>
         </form>
         <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
-          Memories are extracted after each turn and anchored to Walrus — {""}
+          Memories are extracted after each turn and anchored to Walrus —{" "}
           click “memories applied” to see exactly what was recalled.
         </p>
       </div>
@@ -313,8 +330,14 @@ function ChatPanel({
 
 function Avatar() {
   return (
-    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-emerald-600/30 bg-card">
-      <BrainCircuitIcon className="size-4 text-emerald-700 dark:text-emerald-400" />
+    <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-ink/80 bg-mint dark:border-mint/40">
+      <Image
+        src="/brand/walrus-mascot.png"
+        alt=""
+        width={32}
+        height={40}
+        className="h-6 w-auto -translate-y-px"
+      />
     </span>
   );
 }
@@ -322,7 +345,7 @@ function Avatar() {
 function Dot({ delay = 0 }: { delay?: number }) {
   return (
     <span
-      className="size-1.5 animate-bounce rounded-full bg-emerald-500"
+      className="dot-bounce size-1.5 rounded-full bg-mint-strong"
       style={{ animationDelay: `${delay}ms` }}
     />
   );

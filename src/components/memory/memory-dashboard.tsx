@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   BotIcon,
   BrainCircuitIcon,
@@ -52,10 +53,10 @@ interface HealthResponse {
 }
 
 const CATEGORY_STYLES: Record<Category, { icon: React.ReactNode; accent: string }> = {
-  project: { icon: <Link2Icon className="size-3.5" />, accent: "text-blue-600" },
-  constraint: { icon: <ShieldCheckIcon className="size-3.5" />, accent: "text-amber-600" },
-  decision: { icon: <CheckCircle2Icon className="size-3.5" />, accent: "text-violet-600" },
-  preference: { icon: <BrainCircuitIcon className="size-3.5" />, accent: "text-emerald-600" },
+  project: { icon: <Link2Icon className="size-3.5" />, accent: "text-cat-project" },
+  constraint: { icon: <ShieldCheckIcon className="size-3.5" />, accent: "text-cat-constraint" },
+  decision: { icon: <CheckCircle2Icon className="size-3.5" />, accent: "text-cat-decision" },
+  preference: { icon: <BrainCircuitIcon className="size-3.5" />, accent: "text-cat-preference" },
 };
 
 export function MemoryDashboard() {
@@ -144,11 +145,11 @@ function Dashboard({ address }: { address: string }) {
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8">
       {/* Header band */}
-      <div className="relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-emerald-50 via-background to-teal-50 px-5 py-5 dark:from-emerald-950/50 dark:via-background dark:to-teal-950/40">
+      <div className="pixel-grid relative overflow-hidden rounded-2xl border border-border/70 bg-gradient-to-br from-[var(--mint-soft)] via-background to-[var(--sui-soft)] px-5 py-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
-              <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-xs">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-mint text-mint-on shadow-xs">
                 <DatabaseIcon className="size-4" />
               </span>
               Memory Network
@@ -188,7 +189,7 @@ function Dashboard({ address }: { address: string }) {
                 variant="outline"
                 className={cn(
                   health.memwalConfigured
-                    ? "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400"
+                    ? "border-mint-strong/60 text-mint-ink dark:border-mint-strong/40"
                     : "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400"
                 )}
               >
@@ -198,7 +199,7 @@ function Dashboard({ address }: { address: string }) {
                 variant="outline"
                 className={cn(
                   health.relayer.status === "ok"
-                    ? "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-400"
+                    ? "border-mint-strong/60 text-mint-ink dark:border-mint-strong/40"
                     : "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400"
                 )}
               >
@@ -216,7 +217,7 @@ function Dashboard({ address }: { address: string }) {
             <p className="text-xs font-medium text-muted-foreground">
               Memories stored
             </p>
-            <p className="mt-1 text-3xl font-semibold tracking-tight">
+            <p className="pixel-font mt-1 text-3xl font-semibold tracking-tight">
               {data ? data.mirrorCount : "…"}
             </p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">
@@ -255,8 +256,8 @@ function Dashboard({ address }: { address: string }) {
             </p>
             <p
               className={cn(
-                "mt-1 text-3xl font-semibold tracking-tight",
-                chainOk ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                "pixel-font mt-1 text-3xl font-semibold tracking-tight",
+                chainOk ? "text-mint-ink" : "text-amber-600 dark:text-amber-400"
               )}
             >
               {data ? `${data.mirrorCount} ↔ ${data.chain.count ?? "—"}` : "…"}
@@ -291,7 +292,7 @@ function Dashboard({ address }: { address: string }) {
         <Card className="gap-3 py-4">
           <CardHeader className="px-4">
             <CardTitle className="flex items-center gap-1.5 text-sm font-medium">
-              <span className="text-emerald-600">
+              <span className="text-mint-ink">
                 <BotIcon className="size-4" />
               </span>
               Connect any AI agent — MCP
@@ -406,11 +407,20 @@ function Dashboard({ address }: { address: string }) {
         </div>
       ) : data && data.mirrorCount === 0 && !hasPending ? (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border px-6 py-14 text-center">
-          <span className="flex size-12 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/20">
-            <BrainCircuitIcon className="size-6" />
+          <span className="flex size-20 items-center justify-center overflow-hidden rounded-2xl border-2 border-ink bg-mint p-1.5 shadow-[3px_3px_0_0_var(--ink)] dark:border-mint/40 dark:shadow-none">
+            <Image
+              src="/brand/walrus-mascot.png"
+              alt=""
+              width={80}
+              height={100}
+              className="h-16 w-auto"
+            />
           </span>
           <div>
-            <h2 className="text-base font-semibold tracking-tight">
+            <p className="pixel-font text-[10px] uppercase tracking-[0.2em] text-mint-ink">
+              empty namespace
+            </p>
+            <h2 className="mt-1.5 text-base font-semibold tracking-tight">
               No memories yet
             </h2>
             <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
@@ -420,7 +430,7 @@ function Dashboard({ address }: { address: string }) {
             </p>
           </div>
           <Link href="/">
-            <Button className={cn("mt-1 bg-emerald-600 text-white hover:bg-emerald-700")}>
+            <Button className="mt-1 bg-mint font-semibold text-mint-on hover:bg-mint-strong">
               Start chatting
             </Button>
           </Link>
@@ -468,7 +478,7 @@ function Dashboard({ address }: { address: string }) {
                             className={cn(
                               "mt-0.5 size-3.5 shrink-0",
                               m.status === "done"
-                                ? "text-emerald-600"
+                                ? "text-mint-ink"
                                 : "text-destructive"
                             )}
                           />

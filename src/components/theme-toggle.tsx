@@ -26,7 +26,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       <Button
         variant="ghost"
         size="icon"
-        className={cn("size-8", className)}
+        className={cn("size-9 sm:size-8", className)}
         aria-hidden
         tabIndex={-1}
         disabled
@@ -41,7 +41,7 @@ export function ThemeToggle({ className }: { className?: string }) {
     <Button
       variant="ghost"
       size="icon"
-      className={cn("size-8", className)}
+      className={cn("size-9 sm:size-8", className)}
       aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
       onClick={() => setTheme(dark ? "light" : "dark")}
     >

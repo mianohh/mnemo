@@ -1,22 +1,13 @@
 "use client";
 
-import { useCurrentAccount } from "@mysten/dapp-kit";
+import Image from "next/image";
 import {
-  BrainCircuitIcon,
   LockIcon,
-  MailIcon,
   SearchIcon,
   ShieldCheckIcon,
   SparklesIcon,
-  WalletIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useAuth } from "@/components/auth-context";
-import {
-  WalletConnectButton,
-  connectButtonClasses,
-} from "@/components/wallet-connect-button";
-import { cn } from "@/lib/utils";
+import { SignInActions } from "@/components/sign-in-actions";
 
 const FEATURES = [
   {
@@ -37,8 +28,8 @@ const FEATURES = [
 ] as const;
 
 /**
- * Full-width landing hero shown whenever the visitor has no valid session
- * (chat and /memory both). Connect → sign one challenge → in.
+ * Compact sign-in wall for routes that need a session but no marketing page
+ * (e.g. /memory). The `/` route uses the full landing page instead.
  */
 export function SignInGate({
   title = "A chatbot that remembers you.",
@@ -47,28 +38,29 @@ export function SignInGate({
   title?: string;
   blurb?: string;
 }) {
-  const { signIn, signInWithGoogle, signingIn, signInError } = useAuth();
-  const account = useCurrentAccount();
-
   return (
-    <section className="relative overflow-hidden">
-      {/* Decorative wash — pure CSS, no assets */}
-      <div className="pointer-events-none absolute inset-0" aria-hidden>
-        <div className="absolute -top-40 left-1/2 h-[26rem] w-[52rem] -translate-x-1/2 rounded-full bg-emerald-400/25 blur-3xl dark:bg-emerald-500/10" />
-        <div className="absolute top-40 -right-24 h-72 w-72 rounded-full bg-teal-300/25 blur-3xl dark:bg-teal-500/10" />
-        <div className="absolute top-56 -left-20 h-64 w-64 rounded-full bg-emerald-300/20 blur-3xl dark:bg-emerald-600/10" />
-      </div>
-
-      <div className="relative mx-auto flex w-full max-w-4xl flex-col items-center gap-8 px-4 py-16 text-center sm:py-24">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-600/30 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <LockIcon className="size-3" />
+    <section className="pixel-grid mint-wash relative overflow-hidden">
+      <div className="relative mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-4 py-16 text-center sm:py-20">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card/85 px-3 py-1 text-xs font-medium backdrop-blur">
+          <LockIcon className="size-3 text-mint-ink" />
           Decentralized memory on Walrus — your identity, your namespace
         </span>
 
+        <div className="lockup-plate px-6 py-5 sm:px-9 sm:py-6">
+          <Image
+            src="/brand/walrus-lockup.png"
+            alt="Walrus"
+            width={440}
+            height={120}
+            className="h-16 w-auto sm:h-20"
+            priority
+          />
+        </div>
+
         <div className="flex flex-col items-center gap-3">
-          <span className="flex size-14 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md shadow-emerald-600/20">
-            <BrainCircuitIcon className="size-7" />
-          </span>
+          <p className="pixel-font text-[11px] uppercase tracking-[0.25em] text-mint-ink">
+            Mnemo × Walrus × Sui
+          </p>
           <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
             {title}
           </h1>
@@ -77,54 +69,15 @@ export function SignInGate({
           </p>
         </div>
 
-        <div className="flex flex-col items-center gap-2">
-          <Button
-            className={cn(connectButtonClasses, "h-12 px-7 text-base")}
-            onClick={() => void signInWithGoogle()}
-            disabled={signingIn}
-          >
-            <MailIcon className="size-4" />
-            {signingIn ? "Signing you in…" : "Continue with email"}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Uses your Google account — no wallet, no password.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          <span className="h-px w-14 bg-border" />
-          or use a wallet
-          <span className="h-px w-14 bg-border" />
-        </div>
-
-        {account ? (
-          <Button
-            variant="outline"
-            className="h-11 px-6"
-            onClick={() => void signIn()}
-            disabled={signingIn}
-          >
-            <WalletIcon className="size-4" />
-            {signingIn ? "Check your wallet…" : "Sign in with wallet"}
-          </Button>
-        ) : (
-          <WalletConnectButton
-            variant="outline"
-            className="h-11 px-6"
-            label="Connect wallet"
-          />
-        )}
-        {signInError && (
-          <p className="-mt-3 max-w-md text-xs text-destructive">{signInError}</p>
-        )}
+        <SignInActions />
 
         <div className="grid w-full max-w-3xl gap-3 sm:grid-cols-3">
           {FEATURES.map((f) => (
             <div
               key={f.title}
-              className="rounded-xl border border-border/70 bg-card/80 p-4 text-left shadow-xs backdrop-blur-sm"
+              className="sticker-sm rounded-xl bg-card p-4 text-left"
             >
-              <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-mint/40 text-mint-ink">
                 {f.icon}
               </span>
               <h2 className="mt-2.5 text-sm font-semibold">{f.title}</h2>
@@ -134,12 +87,6 @@ export function SignInGate({
             </div>
           ))}
         </div>
-
-        <p className="text-[11px] text-muted-foreground">
-          Email sign-in maps your Google account to a unique Sui address — the
-          Google token is verified server-side and never reaches the browser.
-          Wallet users: Sui Wallet, Nightly, Ethos, Phantom (Sui) and more.
-        </p>
       </div>
     </section>
   );
