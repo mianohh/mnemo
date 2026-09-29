@@ -1,5 +1,5 @@
-import { ChatClient } from "@/components/chat/chat-client";
+import { HomeView } from "@/components/marketing/home-view";
 
 export default function HomePage() {
-  return <ChatClient />;
+  return <HomeView />;
 }
