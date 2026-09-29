@@ -94,16 +94,3 @@ export async function recallForNamespace(
   return { memories: [], attempts, error };
 }
 
-export function formatMemoriesForPrompt(
-  memories: RecalledMemory[]
-): string {
-  if (memories.length === 0) return "";
-  const bullets = memories
-    .map((m) => `- ${m.text} (relevance ${(1 - m.distance).toFixed(2)})`)
-    .join("\n");
-  return [
-    "[Walrus Memory — facts recalled for this user from decentralized storage]",
-    bullets,
-    "Use these when relevant. Never invent facts that are not on this list. If a recalled fact conflicts with what the user just said, trust the user and update your model of them.",
-  ].join("\n");
-}

@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 const SUGGESTIONS = [
   "What do you remember about me?",
   "I'm starting a new project — infra budget is capped at $50/mo",
-  "Remind me why we chose Postgres over MongoDB",
+  "Which memories are most relevant to my current project?",
 ];
 
 function isSavedFactsPart(
