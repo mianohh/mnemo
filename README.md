@@ -278,40 +278,6 @@ sequenceDiagram
 
 ---
 
-## Deployment
-
-Split deployment: **frontend on Vercel**, **API on Render** (`render.yaml`, free plan).
-
-### 1. Render (API)
-
-* `render.yaml` defines the service: `npm ci` → `npm run start:api`, health check path `/api/health`.
-* Set every `sync: false` env var in the Render dashboard (see `.env.example`).
-* `CORS_ORIGINS` must contain the **exact** frontend origin — `https://mnemoai.xyz,http://localhost:3000` — the session cookie is sent cross-origin with `credentials: include`, so the API rejects every other origin with `403 Origin not allowed`.
-
-### 2. Vercel (frontend)
-
-* `NEXT_PUBLIC_API_URL=https://mnemo-api-w4t9.onrender.com` — baked at build time, so set it before (or re-deploy after) the first deploy.
-* `NEXT_PUBLIC_SITE_URL=https://mnemoai.xyz` — used for `metadataBase`, i.e. `og:image` / `twitter:image`. Left unset it defaults to `http://localhost:3000` and every share card points at a URL that does not exist.
-* Optional: `NEXT_PUBLIC_SUI_RPC_URL` to override the default Sui fullnode.
-* The Vercel deployment needs **no** database, Gemini, Walrus, or Google secrets — everything sensitive lives on the API.
-* **Every origin the frontend is served from must be registered in Google Cloud Console ▸ APIs & Services ▸ Credentials ▸ OAuth 2.0 Client ID ▸ Authorized redirect URIs** — currently `https://mnemoai.xyz/auth/callback` and `http://localhost:3000/auth/callback`. An unregistered origin fails with Google's `redirect_uri_mismatch` before any of our code runs.
-* **Serve the apex only.** `www.mnemoai.xyz` has no certificate covering it (`SSL: no alternative certificate subject name matches target hostname`), so it is unusable in a browser — including as an OAuth `redirect_uri`. Point `www` at the apex with a redirect if it needs to work.
-
-### 3. Keep the API awake (free tier)
-
-Free Render instances sleep after ~15 minutes of inactivity; the first request then waits 30–60 s for the process to boot.
-
-* `.github/workflows/keepalive.yml` pings `GET /api/health` every 5 minutes, which keeps the instance warm (an in-process cache still requires a boot to serve, so the ping genuinely wakes a slept instance).
-* One-time setup: repository **Settings ▸ Secrets and variables ▸ Actions ▸ Variables** → add `MNEMO_API_URL = https://mnemo-api-w4t9.onrender.com`.
-* The homepage already never blocks on the API: the landing paints immediately, session and health checks run in parallel, and the health band shows a "waking up" state with a retry button. Chat and `/memory` still need the API for data.
-* Alternative to pings: upgrade Render to an always-on instance ($7/mo).
-
-### 4. Health endpoint
-
-`GET /api/health` runs the relayer and database checks concurrently with a 2.5 s budget each and memoizes the response for 15 s, so a cold wake serves every waiting probe (landing, Render's health check, the keep-alive cron) from a single build.
-
----
-
 ## License
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
