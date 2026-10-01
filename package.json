@@ -21,6 +21,7 @@
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@mysten-incubation/memwal": "^0.1.8",
     "@mysten/dapp-kit": "^1.1.17",
+    "@mysten/sui": "2.33.1",
     "@tanstack/react-query": "^5.103.2",
     "ai": "^7.0.114",
     "class-variance-authority": "^0.7.1",
