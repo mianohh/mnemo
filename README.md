@@ -41,7 +41,7 @@ flowchart TB
     web --> chat
     agent --> mcp
 
-    chat --> recall["Dual-Phase Semantic Recall<br/>memwal.recall(namespace)<br/>relevance gate ≥ 0.2<br/>exponential backoff on index lag"]
+    chat --> recall["Dual-Phase Semantic Recall<br/>memwal.recall(namespace)<br/>relevance floor ≥ 0.2<br/>linear backoff on index lag"]
     recall --> gemini["Gemini Generation Engine<br/>verified recall injected into prompt<br/>response streamed via AI SDK"]
     gemini --> classify["Structured Classification Pass<br/>Gemini Flash, max 3 facts per turn<br/>Zod schema validation"]
     classify --> extract["Durable Fact Extraction<br/>project · constraint · decision · preference"]
@@ -62,8 +62,8 @@ flowchart TB
 | :--- | :--- |
 | **Cryptographic Multi-Tenancy** | Authentication accepts two sign-in paths, both resolving to a verified Sui address: a wallet personal-message challenge, or **Sui zkLogin address derivation** ("Continue with email" — Google OIDC; the address is derived server-side from the verified JWT, no proving service). The storage namespace is deterministically generated as `mnemo-user-{address}` from the verified signer. Clients cannot forge, switch, or inspect arbitrary namespaces. |
 | **Categorical Fact Extraction** | Chat streams pass through a secondary evaluation stage using Google Gemini Flash and Zod schemas, filtering out conversational filler. Context is classified into four durable primitives: `project`, `constraint`, `decision`, or `preference`. |
-| **Deterministic Vector Retrieval** | Before generating responses, semantic search queries the user namespace with a relevance cutoff of ≥ 0.2. Context is dynamically prepended to the system prompt with strict grounding constraints to eliminate hallucinations. |
-| **Vector Index Lag Mitigation** | Asynchronous decentralized writes (encrypt → upload → index) can introduce short replication latencies. Mnemo detects pending writes against the local mirror and executes an exponential backoff retry loop during retrieval, preventing empty recalls. |
+| **Deterministic Vector Retrieval** | Before generating responses, semantic search queries the user namespace with a relevance floor of ≥ 0.2; if every hit falls below the floor, the nearest few are returned instead of nothing. Context is dynamically prepended to the system prompt with strict grounding constraints to eliminate hallucinations. |
+| **Vector Index Lag Mitigation** | Asynchronous decentralized writes (encrypt → upload → index) can introduce short replication latencies. Mnemo detects pending writes against the local mirror and executes a short linear backoff retry loop during retrieval, preventing empty recalls. |
 | **Causal Evidence & Provenance** | The UI renders an active `[N] memories applied` chip on every contextual response. Expanding the chip reveals the exact stored memories alongside their cosine similarity relevance scores. |
 | **A/B Counterfactual Testing** | An integrated **Memory ON/OFF** toggle on the chat interface bypasses recall injection and memory capture on demand, providing verifiable before-and-after demonstration proof. |
 | **Decentralized Parity Audit** | The `/memory` interface reconciles the PostgreSQL mirror count directly against the Walrus Relayer's on-chain `listNamespaces()` metric to mathematically prove decentralized persistence. |
@@ -84,7 +84,7 @@ flowchart TB
 
 ## Getting Started
 
-**Requirements:** Node ≥ 24 and a Postgres database (the mirror schema is created automatically on first write).
+**Requirements:** Node ≥ 24 and a Postgres database (the mirror schema is created automatically on first query).
 
 ```bash
 npm install
@@ -150,7 +150,7 @@ sequenceDiagram
     C->>A: POST messages (session cookie)
     A->>A: Verify HMAC session, derive namespace
     A->>W: memwal.recall(namespace, message)
-    W-->>A: matching facts (relevance ≥ 0.2)
+    W-->>A: matching facts (relevance floor ≥ 0.2)
     A->>G: system prompt + recalled context (stream)
     G-->>C: streamed response
     Note over A,G: metadata on start/finish lists applied memories
@@ -178,7 +178,7 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
   "mirrorCount": 14,
   "counts": { "project": 4, "constraint": 3, "decision": 3, "preference": 4 },
   "chain": { "count": 14, "storageBytes": 5020 },
-  "mcp": { "url": "https://mnemo.app/api/mcp", "token": "mcp.0x3fa2…6b76.<hmac-token>" },
+  "mcp": { "url": "https://mnemoai.xyz/api/mcp", "token": "mcp.0x3fa2…6b76.<hmac-token>" },
   "grouped": {
     "project": [
       {
@@ -224,7 +224,7 @@ Configure your external AI development client using the endpoint and bearer toke
   "mcpServers": {
     "mnemo": {
       "type": "streamable-http",
-      "url": "https://mnemo.app/api/mcp",
+      "url": "https://mnemoai.xyz/api/mcp",
       "headers": {
         "Authorization": "Bearer <mcp-token>"
       }
@@ -286,20 +286,23 @@ Split deployment: **frontend on Vercel**, **API on Render** (`render.yaml`, free
 
 * `render.yaml` defines the service: `npm ci` → `npm run start:api`, health check path `/api/health`.
 * Set every `sync: false` env var in the Render dashboard (see `.env.example`).
-* `CORS_ORIGINS` must contain the **exact** frontend origin (e.g. `https://your-app.vercel.app`) — the session cookie is sent cross-origin with `credentials: include`, so the API rejects other origins.
+* `CORS_ORIGINS` must contain the **exact** frontend origin — `https://mnemoai.xyz,http://localhost:3000` — the session cookie is sent cross-origin with `credentials: include`, so the API rejects every other origin with `403 Origin not allowed`.
 
 ### 2. Vercel (frontend)
 
-* `NEXT_PUBLIC_API_URL=https://<service-name>.onrender.com` — baked at build time, so set it before (or re-deploy after) the first deploy.
+* `NEXT_PUBLIC_API_URL=https://mnemo-api-w4t9.onrender.com` — baked at build time, so set it before (or re-deploy after) the first deploy.
+* `NEXT_PUBLIC_SITE_URL=https://mnemoai.xyz` — used for `metadataBase`, i.e. `og:image` / `twitter:image`. Left unset it defaults to `http://localhost:3000` and every share card points at a URL that does not exist.
 * Optional: `NEXT_PUBLIC_SUI_RPC_URL` to override the default Sui fullnode.
 * The Vercel deployment needs **no** database, Gemini, Walrus, or Google secrets — everything sensitive lives on the API.
+* **Every origin the frontend is served from must be registered in Google Cloud Console ▸ APIs & Services ▸ Credentials ▸ OAuth 2.0 Client ID ▸ Authorized redirect URIs** — currently `https://mnemoai.xyz/auth/callback` and `http://localhost:3000/auth/callback`. An unregistered origin fails with Google's `redirect_uri_mismatch` before any of our code runs.
+* **Serve the apex only.** `www.mnemoai.xyz` has no certificate covering it (`SSL: no alternative certificate subject name matches target hostname`), so it is unusable in a browser — including as an OAuth `redirect_uri`. Point `www` at the apex with a redirect if it needs to work.
 
 ### 3. Keep the API awake (free tier)
 
 Free Render instances sleep after ~15 minutes of inactivity; the first request then waits 30–60 s for the process to boot.
 
 * `.github/workflows/keepalive.yml` pings `GET /api/health` every 5 minutes, which keeps the instance warm (an in-process cache still requires a boot to serve, so the ping genuinely wakes a slept instance).
-* One-time setup: repository **Settings ▸ Secrets and variables ▸ Actions ▸ Variables** → add `MNEMO_API_URL = https://<service-name>.onrender.com`.
+* One-time setup: repository **Settings ▸ Secrets and variables ▸ Actions ▸ Variables** → add `MNEMO_API_URL = https://mnemo-api-w4t9.onrender.com`.
 * The homepage already never blocks on the API: the landing paints immediately, session and health checks run in parallel, and the health band shows a "waking up" state with a retry button. Chat and `/memory` still need the API for data.
 * Alternative to pings: upgrade Render to an always-on instance ($7/mo).
 

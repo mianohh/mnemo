@@ -11,9 +11,10 @@ services:
         value: "24"
       - key: NODE_ENV
         value: production
-      # Frontend origin(s) allowed to call this API — update after the first Vercel deploy.
+      # Frontend origin(s) allowed to call this API. Must match exactly — the
+      # session cookie is sent cross-origin with credentials: include.
       - key: CORS_ORIGINS
-        value: https://your-app.vercel.app
+        value: https://mnemoai.xyz,http://localhost:3000
       - key: GEMINI_MODEL
         value: gemini-flash-lite-latest
       - key: MEMWAL_SERVER_URL
