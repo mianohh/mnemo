@@ -9,7 +9,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
-  --font-pixel: var(--font-silkscreen);
   --font-heading: var(--font-inter);
   --color-ring: var(--ring);
   --color-input: var(--input);
@@ -33,11 +32,7 @@
   --color-mint: var(--brand-mint);
   --color-mint-strong: var(--brand-mint-strong);
   --color-mint-ink: var(--mint-ink);
-  --color-mint-soft: var(--mint-soft);
   --color-mint-on: var(--mint-on);
-  --color-sui: var(--sui-blue);
-  --color-sui-ink: var(--sui-ink);
-  --color-sui-soft: var(--sui-soft);
   --color-ink: var(--ink);
   --color-cat-project: var(--cat-project);
   --color-cat-constraint: var(--cat-constraint);

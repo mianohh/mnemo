@@ -113,11 +113,7 @@ export function createMcpServer(namespace: string): McpServer {
         const fact = { category, text: text.trim() };
         const { saved, settle } = await saveFacts(namespace, [fact]);
         if (saved.length === 0) return fail("Memory is not configured on this deployment.");
-        try {
-          settleAfterResponse(settle);
-        } catch {
-          void settle().catch(() => {});
-        }
+        settleAfterResponse(settle);
         return ok({
           status: "queued",
           category,

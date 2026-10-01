@@ -11,7 +11,7 @@ import {
   countMemories,
   listMemories,
 } from "@/lib/memory/store";
-import { CATEGORIES, type Category, type MirrorMemory } from "@/lib/memory/types";
+import { type Category, type MirrorMemory } from "@/lib/memory/types";
 
 export const runtime = "nodejs";
 
@@ -71,10 +71,7 @@ export async function GET(req: Request) {
     address,
     namespace,
     mirrorCount,
-    counts: CATEGORIES.reduce(
-      (acc, c) => ({ ...acc, [c]: counts[c] }),
-      {} as Record<Category, number>
-    ),
+    counts,
     chain,
     mcp: { url: `${origin}/api/mcp`, token: createMcpToken(address) },
     grouped,

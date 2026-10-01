@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Category, MemoryStatus, MirrorMemory } from "./types";
 
 // One pool per warm process. Stored on globalThis so local dev (HMR) does not
-// leak connections across reloads. Serverless instances each get their own pool
-// against the hosted Postgres (Neon) database — the mirror lives there, not on
-// the ephemeral function filesystem.
+// leak connections across reloads. The API runs as one long-lived Render
+// service, so the single pool is reused across requests; the mirror lives in
+// Postgres, never in the container filesystem.
 const globalStore = globalThis as unknown as {
   __mnemoPool?: Pool;
   __mnemoSchema?: Promise<void>;
@@ -16,10 +16,10 @@ function getPool(): Pool {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error(
-      "DATABASE_URL is not set: create a Postgres database (Vercel Marketplace → Neon) and export DATABASE_URL (see .env.example)"
+      "DATABASE_URL is not set: point it at a Postgres database and export DATABASE_URL (see .env.example)"
     );
   }
-  // `pg` honours `?sslmode=…` on the URL, which Neon sets itself.
+  // `pg` honours `?sslmode=…` on the URL, which hosted providers set themselves.
   const pool = new Pool({ connectionString: url, max: 5 });
   pool.on("error", (err) => console.error("[mnemo] postgres pool error:", err));
   globalStore.__mnemoPool = pool;
