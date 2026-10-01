@@ -9,6 +9,7 @@ import { POST as chatPost } from "../src/app/api/chat/route";
 import { GET as healthGet } from "../src/app/api/health/route";
 import { POST as mcpPost, GET as mcpGet, DELETE as mcpDelete } from "../src/app/api/mcp/route";
 import { GET as memoryGet } from "../src/app/api/memory/route";
+import { raiseConnectAttemptTimeout } from "../src/lib/node-connect";
 
 type Handler = (req: Request) => Response | Promise<Response>;
 
@@ -140,6 +141,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 }
 
 const port = Number(process.env.PORT ?? 4000);
+// This process never loads Next's instrumentation hook, so the Google
+// connect-timeout fix has to be applied here or it does not exist in prod.
+console.log(
+  "[mnemo] api: connect attempt timeout =",
+  raiseConnectAttemptTimeout(8000),
+  "ms"
+);
 createServer((req, res) => {
   void handle(req, res);
 }).listen(port, () => {
