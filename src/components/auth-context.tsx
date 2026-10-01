@@ -69,6 +69,19 @@ function getServerForgetSnapshot(): boolean {
   return false;
 }
 
+/**
+ * True while the browser is on the OAuth redirect target with a `code` from
+ * Google. The session cookie cannot exist yet on that navigation, so the only
+ * answer a session probe can give is 401.
+ */
+function isOAuthCallback(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.location.pathname === "/auth/callback" &&
+    new URLSearchParams(window.location.search).has("code")
+  );
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const account = useCurrentAccount();
   const { mutateAsync: disconnectAsync } = useDisconnectWallet();
@@ -79,6 +92,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [signingIn, setSigningIn] = React.useState(false);
   const [signInError, setSignInError] = React.useState<string | null>(null);
   const autoTriedFor = React.useRef<string | null>(null);
+  /**
+   * Bumped whenever a sign-in starts, succeeds, or ends. An in-flight
+   * `refreshSession` captures the value before it awaits and discards its
+   * result if it moved — otherwise the 401 it collected before the cookie
+   * existed lands *after* the exchange created one and silently signs the
+   * user back out.
+   */
+  const sessionEpoch = React.useRef(0);
+  /** Read synchronously, unlike `signingIn`, so guards see the update at once. */
+  const signingInRef = React.useRef(false);
 
   const forgetMode = React.useSyncExternalStore(
     subscribeForget,
@@ -87,8 +110,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshSession = React.useCallback(async () => {
+    const epoch = sessionEpoch.current;
     try {
+      if (signingInRef.current || isOAuthCallback()) return;
       const res = await apiFetch("/api/auth/session", { cache: "no-store" });
+      // A sign-in began while this was in flight; its result is newer than
+      // ours, so a stale 401 must not wipe it.
+      if (epoch !== sessionEpoch.current) return;
       if (res.ok) {
         const data = (await res.json()) as Session;
         setSession(data);
@@ -96,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSession(null);
       }
     } catch {
-      setSession(null);
+      if (epoch === sessionEpoch.current) setSession(null);
     } finally {
       setSessionLoading(false);
     }
@@ -115,6 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     setSigningIn(true);
+    signingInRef.current = true;
+    sessionEpoch.current += 1;
     setSignInError(null);
     try {
       const text = signinMessage(Date.now());
@@ -147,6 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       return false;
     } finally {
+      signingInRef.current = false;
       setSigningIn(false);
     }
   }, [account, signPersonalMessageAsync]);
@@ -162,6 +193,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = React.useCallback(async (): Promise<boolean> => {
     setSigningIn(true);
+    signingInRef.current = true;
+    sessionEpoch.current += 1;
     setSignInError(null);
     try {
       // Navigates to Google; the callback page finishes the sign-in.
@@ -169,6 +202,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch (e) {
       setSignInError(e instanceof Error ? e.message : "Sign-in failed");
+      signingInRef.current = false;
       setSigningIn(false);
       return false;
     }
@@ -176,20 +210,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishGoogleSignIn = React.useCallback(
     async (code: string, state: string): Promise<boolean> => {
+      // Invalidate every session probe already in flight before we create the
+      // cookie, so none of them can land afterwards and clear it.
+      sessionEpoch.current += 1;
+      signingInRef.current = true;
       setSigningIn(true);
       setSignInError(null);
       try {
-        const identity = await completeZkLogin({ code, state });
-        setSession({
-          address: identity.address,
-          namespace: addressNamespace(identity.address),
-          email: identity.email,
-        });
+        await completeZkLogin({ code, state });
+        // The cookie is the source of truth. Reading it back means a browser
+        // that dropped the sign-in cookie fails loudly here instead of
+        // silently signing the user out on the next reload.
+        const res = await apiFetch("/api/auth/session", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(
+            "Your browser blocked the sign-in cookie — allow cookies and site data for this site, then try again."
+          );
+        }
+        setSession((await res.json()) as Session);
         return true;
       } catch (e) {
         setSignInError(e instanceof Error ? e.message : "Sign-in failed");
         return false;
       } finally {
+        signingInRef.current = false;
         setSigningIn(false);
       }
     },
@@ -197,6 +241,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = React.useCallback(async () => {
+    // Invalidate any in-flight refresh so it cannot restore the session we
+    // are about to clear.
+    sessionEpoch.current += 1;
     clearZkLoginCache();
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });

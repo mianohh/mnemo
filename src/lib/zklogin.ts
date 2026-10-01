@@ -30,11 +30,21 @@ function readJson<T>(key: string): T | null {
   }
 }
 
+const SITE_DATA_BLOCKED =
+  "Site data is blocked — allow cookies and site data for this site, then try again.";
+
 function writeJson(key: string, value: unknown): void {
+  const raw = JSON.stringify(value);
   try {
-    window.sessionStorage.setItem(key, JSON.stringify(value));
+    window.sessionStorage.setItem(key, raw);
   } catch {
-    /* storage unavailable — the flow still works within this page */
+    throw new Error(SITE_DATA_BLOCKED);
+  }
+  // Storage can be quota-frozen or hardened against writes without throwing.
+  // If the value did not stick, say so instead of failing later with a
+  // misleading "session expired".
+  if (window.sessionStorage.getItem(key) !== raw) {
+    throw new Error(SITE_DATA_BLOCKED);
   }
 }
 
@@ -109,12 +119,20 @@ export async function completeZkLogin(params: {
   state?: string | null;
 }): Promise<ZkLoginIdentity> {
   const pending = readJson<PendingZkLogin>(PENDING_KEY);
-  remove(PENDING_KEY);
-  if (!pending) throw new Error("Sign-in session expired — please try again");
-  if (!params.code) throw new Error("Google did not return a sign-in code");
+  if (!pending) {
+    remove(PENDING_KEY);
+    throw new Error("Sign-in session expired — please try again");
+  }
+  if (!params.code) {
+    remove(PENDING_KEY);
+    throw new Error("Google did not return a sign-in code");
+  }
   if (!params.state || params.state !== pending.state) {
+    remove(PENDING_KEY);
     throw new Error("Sign-in response could not be verified — please try again");
   }
+  // Only a response that actually matches this attempt consumes the attempt.
+  remove(PENDING_KEY);
 
   const res = await apiFetch("/api/auth/zklogin/exchange", {
     method: "POST",
