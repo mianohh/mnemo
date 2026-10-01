@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { MemoryIndicator } from "@/components/chat/memory-indicator";
 import { useAuth } from "@/components/auth-context";
 import { SignInGate } from "@/components/sign-in-gate";
-import { apiUrl } from "@/lib/api";
+import { apiFetch, apiUrl } from "@/lib/api";
 import { addressNamespace } from "@/lib/sui";
 import type { ChatUIMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,23 @@ function ChatPanel({
 
   const busy = status === "submitted" || status === "streaming";
 
+  // The model is configurable (GEMINI_MODEL), so read it from the API instead
+  // of hardcoding a name that silently goes stale on the next deploy.
+  const [model, setModel] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((body: { llm?: unknown }) => {
+        if (!cancelled && typeof body.llm === "string") setModel(body.llm);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   React.useEffect(() => {
     for (const message of messages) {
       if (message.role !== "assistant") continue;
@@ -117,9 +134,11 @@ function ChatPanel({
           <span className="truncate rounded-full border border-border bg-card px-2 py-0.5 font-mono text-[11px]">
             {namespace}
           </span>
-          <span className="hidden whitespace-nowrap rounded-full border border-border px-2 py-0.5 font-mono text-[11px] sm:inline">
-            gemini-flash-lite-latest
-          </span>
+          {model && (
+            <span className="hidden whitespace-nowrap rounded-full border border-border px-2 py-0.5 font-mono text-[11px] sm:inline">
+              {model}
+            </span>
+          )}
         </div>
         <label className="flex shrink-0 cursor-pointer items-center gap-2 text-xs">
           <span
