@@ -7,7 +7,7 @@ export interface RecalledMemoryMeta {
   createdAt?: string;
 }
 
-export interface ChatMessageMetadata {
+interface ChatMessageMetadata {
   /** Memories injected into this turn's prompt, in injection order. */
   memories?: RecalledMemoryMeta[];
   recallAttempts?: number;
@@ -15,12 +15,12 @@ export interface ChatMessageMetadata {
   memoryEnabled?: boolean;
 }
 
-export interface SavedFactsData {
+interface SavedFactsData {
   facts: { category: Category; text: string }[];
   network: "mainnet" | "testnet";
 }
 
-export type ChatDataParts = {
+type ChatDataParts = {
   savedFacts: SavedFactsData;
 };
 
