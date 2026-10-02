@@ -1,5 +1,6 @@
 import { getMemWal, memoryConfigured, memwalNetwork } from "@/lib/memory/client";
-import { pingDatabase } from "@/lib/memory/store";
+import { pingDatabase, expirySnapshot } from "@/lib/memory/store";
+import { summariseExpiry, type ExpirySummary } from "@/lib/memory/anchor";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,16 @@ interface HealthBody {
   network: string;
   relayer: { status?: string; version?: string; error?: string };
   database: boolean;
+  /** Walrus blob lifetime — lapsed blobs are unrecoverable, so surface it here. */
+  walrus?: Pick<
+    ExpirySummary,
+    | "anchored"
+    | "unanchored"
+    | "walrusEpoch"
+    | "soonestExpiryEpoch"
+    | "epochsRemaining"
+    | "warn"
+  >;
   geminiConfigured: boolean;
   zkLogin: { googleConfigured: boolean; saltConfigured: boolean };
   time: string;
@@ -59,14 +70,38 @@ async function buildHealth(): Promise<HealthBody> {
   const memwalConfigured = memoryConfigured();
   const databaseConfigured = Boolean(process.env.DATABASE_URL);
 
-  const [relayer, database] = await Promise.all([
+  const walrusTask = databaseConfigured
+    ? withTimeout(expirySnapshot())
+        .then((snapshot) => {
+          const {
+            anchored,
+            unanchored,
+            walrusEpoch,
+            soonestExpiryEpoch,
+            epochsRemaining,
+            warn,
+          } = summariseExpiry(snapshot, []);
+          return {
+            anchored,
+            unanchored,
+            walrusEpoch,
+            soonestExpiryEpoch,
+            epochsRemaining,
+            warn,
+          };
+        })
+        .catch(() => undefined)
+    : Promise.resolve(undefined);
+
+  const [relayer, database, walrus] = await Promise.all([
     relayerHealth(memwalConfigured),
     databaseConfigured
       ? withTimeout(pingDatabase()).catch(() => false)
       : Promise.resolve(false),
+    walrusTask,
   ]);
 
-  return {
+  const body: HealthBody = {
     ok: true,
     app: "mnemo-ai",
     llm: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
@@ -85,6 +120,8 @@ async function buildHealth(): Promise<HealthBody> {
     },
     time: new Date().toISOString(),
   };
+  if (walrus) body.walrus = walrus;
+  return body;
 }
 
 export async function GET() {

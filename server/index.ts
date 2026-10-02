@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import { POST as authLogin } from "../src/app/api/auth/login/route";
 import { POST as authLogout } from "../src/app/api/auth/logout/route";
@@ -9,10 +11,17 @@ import { POST as chatPost } from "../src/app/api/chat/route";
 import { GET as healthGet } from "../src/app/api/health/route";
 import { POST as mcpPost, GET as mcpGet, DELETE as mcpDelete } from "../src/app/api/mcp/route";
 import { GET as memoryGet } from "../src/app/api/memory/route";
+import {
+  GET as memoryExpiryGet,
+  POST as memoryExpiryPost,
+} from "../src/app/api/memory/expiry/route";
 import { raiseConnectAttemptTimeout } from "../src/lib/node-connect";
 
 type Handler = (req: Request) => Response | Promise<Response>;
 
+// Next serves every src/app/api/**/route.ts automatically; this bare server
+// runs only what is listed here. A route file forgotten below works on Vercel
+// and 404s on Render, so boot logs any gap instead of failing silently.
 const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/auth/login": { POST: authLogin },
   "/api/auth/logout": { POST: authLogout },
@@ -21,9 +30,27 @@ const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/auth/zklogin/exchange": { POST: zkLoginExchange },
   "/api/chat": { POST: chatPost },
   "/api/memory": { GET: memoryGet },
+  "/api/memory/expiry": { GET: memoryExpiryGet, POST: memoryExpiryPost },
   "/api/health": { GET: healthGet },
   "/api/mcp": { GET: mcpGet, POST: mcpPost, DELETE: mcpDelete },
 };
+
+/** Log any route file under src/app/api that this table does not expose. */
+function warnUnregisteredRoutes(): void {
+  const root = join(process.cwd(), "src", "app", "api");
+  if (!existsSync(root)) return;
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(path, `${prefix}/${entry.name}`);
+      } else if (entry.name === "route.ts" && !(prefix in ROUTES)) {
+        console.warn(`[mnemo] api: ${prefix} has a route.ts but no entry in ROUTES`);
+      }
+    }
+  };
+  walk(root, "/api");
+}
 
 function allowedOrigins(): string[] {
   return (process.env.CORS_ORIGINS ?? "")
@@ -152,4 +179,5 @@ createServer((req, res) => {
   void handle(req, res);
 }).listen(port, () => {
   console.log(`[mnemo] api listening on http://localhost:${port}`);
+  warnUnregisteredRoutes();
 });

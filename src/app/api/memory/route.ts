@@ -9,8 +9,15 @@ import { getMemWal, memoryConfigured } from "@/lib/memory/client";
 import {
   countByCategory,
   countMemories,
+  expirySnapshot,
+  listExpiries,
   listMemories,
 } from "@/lib/memory/store";
+import {
+  maybeSyncAnchors,
+  summariseExpiry,
+  type ExpirySummary,
+} from "@/lib/memory/anchor";
 import { type Category, type MirrorMemory } from "@/lib/memory/types";
 
 export const runtime = "nodejs";
@@ -22,13 +29,27 @@ export async function GET(req: Request) {
   }
 
   const namespace = addressNamespace(address);
+
+  // Refresh the on-chain anchor (object id + end epoch) for any blob the
+  // mirror has not resolved yet. Best effort: a Sui hiccup must not take the
+  // dashboard down, and it is a no-op when everything is already anchored.
+  let sync: { linked?: number; error?: string } = {};
+  try {
+    const result = await maybeSyncAnchors();
+    if (result) sync = { linked: result.linked, error: result.error };
+  } catch (e) {
+    sync = { error: e instanceof Error ? e.message : String(e) };
+  }
+
   let memories: MirrorMemory[];
   let counts: Record<Category, number>;
   let mirrorCount: number;
+  let expiry: ExpirySummary | null = null;
   try {
     memories = await listMemories(namespace);
     counts = await countByCategory(namespace);
     mirrorCount = await countMemories(namespace);
+    expiry = summariseExpiry(await expirySnapshot(), await listExpiries());
   } catch {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }
@@ -73,6 +94,8 @@ export async function GET(req: Request) {
     mirrorCount,
     counts,
     chain,
+    expiry,
+    sync,
     mcp: { url: `${origin}/api/mcp`, token: createMcpToken(address) },
     grouped,
   });
