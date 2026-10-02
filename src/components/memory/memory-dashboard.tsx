@@ -39,6 +39,17 @@ interface MemoryResponse {
   mirrorCount: number;
   counts: Record<Category, number>;
   chain: { count?: number; storageBytes?: number; error?: string };
+  expiry?: {
+    anchored: number;
+    unanchored: number;
+    walrusEpoch: number | null;
+    soonestExpiryEpoch: number | null;
+    soonestExpiresAt: string | null;
+    epochsRemaining: number | null;
+    daysRemaining: number | null;
+    epochLengthDays: number;
+    warn: boolean;
+  };
   mcp?: { url: string; token: string };
   grouped: Record<Category, MirrorMemory[]>;
 }
@@ -207,6 +218,21 @@ function Dashboard({ address }: { address: string }) {
               </Badge>
             </>
           )}
+          {data?.expiry?.soonestExpiryEpoch !== null &&
+            data?.expiry?.soonestExpiryEpoch !== undefined && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "font-mono",
+                  data.expiry.warn
+                    ? "border-amber-300 text-amber-700 dark:border-amber-800 dark:text-amber-400"
+                    : undefined
+                )}
+              >
+                walrus e{data.expiry.walrusEpoch} → expires e
+                {data.expiry.soonestExpiryEpoch}
+              </Badge>
+            )}
         </div>
       </div>
 
@@ -281,6 +307,32 @@ function Dashboard({ address }: { address: string }) {
       {data?.chain.error && (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-500">
           Relayer cross-check failed: {data.chain.error}
+        </p>
+      )}
+      {data?.expiry && (
+        <p
+          className={cn(
+            "mt-2 text-xs",
+            data.expiry.warn
+              ? "font-medium text-amber-700 dark:text-amber-500"
+              : "text-muted-foreground"
+          )}
+        >
+          Walrus holds {data.expiry.anchored} blob
+          {data.expiry.anchored === 1 ? "" : "s"} on epoch{" "}
+          {data.expiry.epochLengthDays}-day clock
+          {data.expiry.soonestExpiresAt && (
+            <>
+              {" "}
+              · first disappears e{data.expiry.soonestExpiryEpoch} (~
+              {data.expiry.soonestExpiresAt.slice(0, 10)}),{" "}
+              {data.expiry.epochsRemaining} epoch
+              {data.expiry.epochsRemaining === 1 ? "" : "s"} left
+            </>
+          )}
+          {data.expiry.unanchored > 0 &&
+            ` · ${data.expiry.unanchored} not yet resolved on Sui`}
+          {data.expiry.warn && " — renew before the end epoch or it is gone."}
         </p>
       )}
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
@@ -489,6 +541,20 @@ function Dashboard({ address }: { address: string }) {
                       </div>
                       <div className="mt-1 flex items-center justify-between gap-2 pl-5 font-mono text-[10px] text-muted-foreground">
                         <span>{m.createdAt.slice(0, 16).replace("T", " ")}</span>
+                        {m.blobExpiryEpoch !== null && (
+                          <span
+                            className={
+                              data?.expiry?.warn ? "text-amber-600" : undefined
+                            }
+                            title={
+                              m.blobObjectId
+                                ? `Blob object ${m.blobObjectId}`
+                                : undefined
+                            }
+                          >
+                            e{m.blobExpiryEpoch}
+                          </span>
+                        )}
                         {m.blobId ? (
                           <button
                             onClick={() => void copy(m.blobId!)}
