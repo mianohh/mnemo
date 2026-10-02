@@ -1,0 +1,64 @@
+name: walrus-expiry
+
+# Blobs lapse at a fixed Walrus end epoch and cannot be renewed afterwards,
+# so a daily poll of /api/memory/expiry is the only thing between us and
+# silent data loss. The route forces a Sui re-sync (which also links any
+# mirror rows still missing their blob object id) and reports how much life
+# is left in every blob we hold.
+#
+# Needs repository variable MNEMO_API_URL (same one keep-alive uses) and
+# repository secret CRON_SECRET (identical to the Render env var).
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Fetch expiry report
+        env:
+          API_URL: ${{ vars.MNEMO_API_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::error::Set repository variable MNEMO_API_URL (Settings ▸ Secrets and variables ▸ Actions ▸ Variables)."
+            exit 1
+          fi
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Set repository secret CRON_SECRET (same value as the Render env var)."
+            exit 1
+          fi
+
+          curl -fsS --max-time 120 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${API_URL%/}/api/memory/expiry" > expiry.json
+
+          python3 - <<'PY'
+          import json, sys
+
+          d = json.load(open("expiry.json"))
+          print(json.dumps({k: d.get(k) for k in (
+              "anchored", "unanchored", "walrusEpoch", "epochLengthDays",
+              "soonestExpiryEpoch", "soonestExpiresAt", "epochsRemaining",
+              "daysRemaining", "warn",
+          )}, indent=1))
+
+          # Lapsed blobs are unrecoverable: fail loudly well before the end epoch.
+          if d.get("warn"):
+              objects = (d.get("renewWith") or {}).get("objects", [])
+              print(f"::error::blob expiry within 3 epochs — renew from the owner "
+                    f"wallet before e{d.get('soonestExpiryEpoch')} "
+                    f"({d.get('soonestExpiresAt')}); objects={json.dumps(objects)}")
+              sys.exit(1)
+
+          # Rows the Sui sync could not match to a Blob object are invisible
+          # to this alert, so surface them separately.
+          unanchored = int(d.get("unanchored") or 0)
+          if unanchored:
+              print(f"::warning::{unanchored} mirror row(s) not linked to a Sui "
+                    f"Blob object — check sync.error in the response")
+          PY
