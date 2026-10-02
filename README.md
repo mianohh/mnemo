@@ -8,7 +8,7 @@
 
 *An autonomous AI continuity agent that retains durable facts—projects, constraints, architectural decisions, and personal preferences—persisted to decentralized storage and semantically recalled across sessions, clients, and devices.*
 
-[Architecture](#system-architecture) • [Core Capabilities](#core-capabilities) • [Getting Started](#getting-started) • [MCP Server](#model-context-protocol-mcp) • [API Reference](#api-reference) • [Deployment](#deployment)
+[Architecture](#system-architecture) • [Core Capabilities](#core-capabilities) • [Getting Started](#getting-started) • [MCP Server](#model-context-protocol-mcp) • [API Reference](#api-reference)
 
 ---
 
@@ -118,7 +118,8 @@ docker run -d --name mnemo-pg -p 5433:5433 -e POSTGRES_USER=mnemo -e POSTGRES_DB
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `POST` | `/api/chat` | Session cookie | Streams the assistant reply; recalls memories, extracts durable facts, persists them |
-| `GET` | `/api/memory` | Session cookie | Mirror records, categorical counts, relayer cross-check, MCP endpoint and token |
+| `GET` | `/api/memory` | Session cookie | Mirror records, categorical counts, relayer cross-check, blob expiry summary, MCP endpoint and token |
+| `GET` / `POST` | `/api/memory/expiry` | Session cookie or `Bearer $CRON_SECRET` | Reconciles the mirror against Sui and reports per-blob object ids and end epochs |
 | `POST` | `/api/mcp` | Bearer (MCP token) | MCP Streamable HTTP: `initialize`, `tools/list`, `tools/call` |
 | `GET` | `/api/mcp` | Bearer (MCP token) | `405` — clients must use `POST` |
 | `DELETE` | `/api/mcp` | Bearer (MCP token) | `200` acknowledgement (stateless endpoint) |
@@ -127,7 +128,7 @@ docker run -d --name mnemo-pg -p 5433:5433 -e POSTGRES_USER=mnemo -e POSTGRES_DB
 | `POST` | `/api/auth/zklogin/exchange` | — | Exchanges the OAuth code server-side, validates the JWT (`aud`/`iss`/`exp`), derives the zkLogin address from the HMAC salt, and sets the session cookie (the JWT never leaves the server) |
 | `POST` | `/api/auth/logout` | Session cookie | Clears the session cookie |
 | `GET` | `/api/auth/session` | Session cookie | Current address, namespace and email (`401` when signed out) |
-| `GET` | `/api/health` | — | Liveness: relayer status, database connectivity, LLM configuration, zkLogin sign-in configuration |
+| `GET` | `/api/health` | — | Liveness: relayer status, database connectivity, LLM configuration, zkLogin sign-in configuration, Walrus blob lifetime |
 
 ### Conversational Endpoints
 
@@ -178,6 +179,17 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
   "mirrorCount": 14,
   "counts": { "project": 4, "constraint": 3, "decision": 3, "preference": 4 },
   "chain": { "count": 14, "storageBytes": 5020 },
+  "expiry": {
+    "anchored": 147,
+    "unanchored": 0,
+    "walrusEpoch": 40,
+    "epochLengthDays": 14,
+    "soonestExpiryEpoch": 47,
+    "soonestExpiresAt": "2026-12-31T08:34:30.332Z",
+    "epochsRemaining": 7,
+    "daysRemaining": 98,
+    "warn": false
+  },
   "mcp": { "url": "https://mnemoai.xyz/api/mcp", "token": "mcp.0x3fa2…6b76.<hmac-token>" },
   "grouped": {
     "project": [
@@ -188,7 +200,10 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
         "blobId": "TsIVjps0x5NGFIZIW0QoPZ37qQXldosdhy2uxXPPsEQ",
         "jobId": "fb131f95-0551-46d5-9ea4-d4e13530529a",
         "status": "done",
-        "createdAt": "2026-09-26T06:43:40.865Z"
+        "createdAt": "2026-09-26T06:43:40.865Z",
+        "blobObjectId": "0x2a17…e9c4",
+        "blobStartEpoch": 40,
+        "blobExpiryEpoch": 55
       }
     ],
     "constraint": ["…"],
@@ -199,6 +214,25 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
 ```
 
 `chain.count` is read live from the Walrus Relayer's `listNamespaces()` metric; equality with `mirrorCount` demonstrates that state exists onchain, not only in the local database.
+
+`blobObjectId` / `blobStartEpoch` / `blobExpiryEpoch` come from the Walrus `Blob` object on Sui — the relayer transfers every blob it writes to the account owner, so the owner's object set is the on-chain truth. The route reconciles any unresolved rows on first load (read-only Sui GraphQL; a Sui hiccup degrades to "unresolved" rather than an error).
+
+#### `GET /api/memory/expiry`
+
+The expiry report a cron should poll. Every Walrus blob has a mandatory end epoch, and **a lapsed blob cannot be renewed or recovered** — the relayer only drops the index rows when it starts 404ing.
+
+* **Authentication:** signed-in session **or** `Authorization: Bearer $CRON_SECRET`.
+* **Behaviour:** forces a fresh Sui reconciliation, then reports per-blob end epochs, the epoch clock, and the object ids needed to renew.
+* **Response:** the `expiry` object above plus `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`.
+* **Renewal:** `walrus extend --blob-obj-id <blob_object_id>` — only possible **before** the end epoch, and only from the wallet that owns the blob objects (`MEMWAL_OWNER_ADDRESS`). Blobs are bought for 15 epochs (~7 months) and nothing extends them automatically.
+
+Suggested cron (daily):
+
+```bash
+curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://mnemoai.xyz/api/memory/expiry
+```
+
+`warn` flips true within 3 epochs of the first expiry, and `GET /api/health` mirrors the same numbers under `walrus` so an uptime monitor can alert on it.
 
 ---
 
