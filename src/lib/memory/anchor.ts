@@ -1,6 +1,7 @@
 import { fetchOwnedBlobs, isBlobCacheStale } from "./walrus-chain";
 import {
   countUnanchored,
+  linkNormalizedAnchors,
   linkOnChainBlobs,
   type ExpirySnapshot,
   type ExpiryEntry,
@@ -18,6 +19,8 @@ import {
 export interface SyncResult {
   fetched: number;
   linked: number;
+  /** Rows rescued by `normalizeBlobId` — a mirror storing a foreign id format. */
+  renormalized?: number;
   error?: string;
   /** Set when Sui was unreachable and the last known blob set was reused. */
   stale?: boolean;
@@ -32,16 +35,24 @@ export async function syncAnchors(
       return { fetched: 0, linked: 0, error: "MEMWAL_ACCOUNT_ID is not set" };
     }
     const blobs = await fetchOwnedBlobs({ accountId, force: opts.force });
-    const linked = await linkOnChainBlobs(
-      blobs.map((b) => ({
-        blobId: b.blobId,
-        objectId: b.objectId,
-        startEpoch: b.startEpoch,
-        expiryEpoch: b.endEpoch,
-      }))
-    );
+    const anchors = blobs.map((b) => ({
+      blobId: b.blobId,
+      objectId: b.objectId,
+      startEpoch: b.startEpoch,
+      expiryEpoch: b.endEpoch,
+    }));
+    const linked = await linkOnChainBlobs(anchors);
+    // Anything still unanchored after the exact match gets one more chance:
+    // canonicalize both sides, so a mirror written as decimal, hex or padded
+    // base64 still resolves to the same blob.
+    const renormalized = await linkNormalizedAnchors(anchors);
     const stale = isBlobCacheStale();
-    return { fetched: blobs.length, linked, ...(stale ? { stale } : {}) };
+    return {
+      fetched: blobs.length,
+      linked: linked + renormalized,
+      ...(renormalized > 0 ? { renormalized } : {}),
+      ...(stale ? { stale } : {}),
+    };
   } catch (e) {
     return {
       fetched: 0,

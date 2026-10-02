@@ -55,6 +55,27 @@ function decimalBlobIdToBase64Url(decimal: string): string {
   return Buffer.from(hex, "hex").toString("base64url");
 }
 
+/**
+ * Canonicalize a stored blob id to the aggregator's unpadded base64url form.
+ * The same blob is written as a decimal u256 on chain, as base64url by the
+ * aggregator/SDK, and as padded standard base64 by anything speaking plain
+ * base64 — a mirror row in either of the latter two spells a blob the exact
+ * match in `linkOnChainBlobs` will never see. Anything that is none of these
+ * (a job id, a testnet id, a typo) is returned untouched so it still fails to
+ * match rather than matching something else.
+ */
+export function normalizeBlobId(id: string): string {
+  const trimmed = id.trim();
+  if (/^\d{1,78}$/.test(trimmed)) return decimalBlobIdToBase64Url(trimmed);
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
+    return Buffer.from(trimmed, "hex").toString("base64url");
+  }
+  if (/^[0-9A-Za-z+/\-_]{40,44}={0,2}$/.test(trimmed)) {
+    return Buffer.from(trimmed, "base64").toString("base64url");
+  }
+  return id;
+}
+
 async function gql<T>(
   query: string,
   variables: Record<string, unknown>

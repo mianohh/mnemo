@@ -1,5 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 import { randomUUID } from "node:crypto";
+import { normalizeBlobId } from "./walrus-chain";
 import type { Category, MemoryStatus, MirrorMemory } from "./types";
 
 /** One on-chain anchor per memory: the Walrus Blob object and its lifetime. */
@@ -213,6 +214,57 @@ export async function linkOnChainBlobs(anchors: BlobAnchor[]): Promise<number> {
   );
 }
 
+/**
+ * Second pass for rows the exact match missed: canonicalize both sides in JS
+ * and update the pairs that now agree. Only ever sees rows that are still
+ * unanchored after `linkOnChainBlobs`, so a mirror written in a foreign id
+ * format (decimal, hex, padded base64) still gets its object id and lifetime.
+ */
+export async function linkNormalizedAnchors(
+  anchors: BlobAnchor[],
+  limit = 2000
+): Promise<number> {
+  if (anchors.length === 0) return 0;
+  const rows = await query<{ id: string; blob_id: string }>(
+    `SELECT id, blob_id FROM memories
+     WHERE blob_id IS NOT NULL AND blob_object_id IS NULL
+     LIMIT $1`,
+    [limit]
+  );
+  if (rows.length === 0) return 0;
+
+  const byId = new Map<string, BlobAnchor>();
+  for (const anchor of anchors) {
+    const key = normalizeBlobId(anchor.blobId);
+    if (!byId.has(key)) byId.set(key, anchor);
+  }
+
+  const ids: string[] = [];
+  const objectIds: string[] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const row of rows) {
+    const anchor = byId.get(normalizeBlobId(row.blob_id));
+    if (!anchor) continue;
+    ids.push(row.id);
+    objectIds.push(anchor.objectId);
+    starts.push(anchor.startEpoch);
+    ends.push(anchor.expiryEpoch);
+  }
+  if (ids.length === 0) return 0;
+
+  return exec(
+    `UPDATE memories AS m
+     SET blob_object_id = x.object_id,
+         blob_start_epoch = x.start_epoch,
+         blob_expiry_epoch = x.expiry_epoch
+     FROM unnest($1::text[], $2::text[], $3::int[], $4::int[])
+       AS x(id, object_id, start_epoch, expiry_epoch)
+     WHERE m.id = x.id`,
+    [ids, objectIds, starts, ends]
+  );
+}
+
 /** Mirror rows whose blob id has not been resolved to a Sui object yet. */
 export async function countUnanchored(): Promise<number> {
   const rows = await query<{ n: string }>(
@@ -220,6 +272,22 @@ export async function countUnanchored(): Promise<number> {
      WHERE blob_id IS NOT NULL AND blob_object_id IS NULL`
   );
   return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * A few of those ids, newest first. When the Sui sync reports `linked: 0`
+ * against a non-empty mirror, these are the strings to compare against the
+ * chain's base64url ids — the fastest way to spot an encoding mismatch.
+ */
+export async function listUnanchoredSample(limit = 5): Promise<string[]> {
+  const rows = await query<{ blob_id: string }>(
+    `SELECT blob_id FROM memories
+     WHERE blob_id IS NOT NULL AND blob_object_id IS NULL
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return rows.map((r) => r.blob_id);
 }
 
 /**
