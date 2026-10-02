@@ -15,6 +15,8 @@ export const runtime = "nodejs";
  */
 const CHECK_TIMEOUT_MS = 2_500;
 const CACHE_TTL_MS = 15_000;
+const AUTH_TIMEOUT_MS = 5_000;
+const AUTH_CACHE_TTL_MS = 5 * 60_000;
 
 interface HealthBody {
   ok: boolean;
@@ -22,7 +24,17 @@ interface HealthBody {
   llm: string;
   memwalConfigured: boolean;
   network: string;
-  relayer: { status?: string; version?: string; error?: string };
+  /**
+   * `auth` answers a different question than `status`: health() is
+   * unauthenticated, so it proves the relayer is up, not that *our* delegate
+   * key is accepted. true/false/null = accepted / rejected / not measured.
+   */
+  relayer: {
+    status?: string;
+    version?: string;
+    error?: string;
+    auth?: boolean | null;
+  };
   database: boolean;
   /** Walrus blob lifetime — lapsed blobs are unrecoverable, so surface it here. */
   walrus?: Pick<
@@ -41,17 +53,70 @@ interface HealthBody {
 
 let cache: { body: HealthBody; at: number } | null = null;
 
-function withTimeout<T>(task: Promise<T>): Promise<T> {
+function withTimeout<T>(
+  task: Promise<T>,
+  budgetMs: number = CHECK_TIMEOUT_MS
+): Promise<T> {
   return Promise.race([
     task,
     new Promise<T>((_, reject) => {
       const timer = setTimeout(
         () => reject(new Error("health check timed out")),
-        CHECK_TIMEOUT_MS
+        budgetMs
       );
       (timer as { unref?: () => void }).unref?.();
     }),
   ]);
+}
+
+let authCache: { value: boolean | null; at: number } | null = null;
+let authInFlight: Promise<boolean | null> | null = null;
+
+async function measureRelayerAuth(): Promise<boolean | null> {
+  try {
+    await withTimeout(
+      getMemWal().listNamespaces({ limit: 1 }),
+      AUTH_TIMEOUT_MS
+    );
+    return true;
+  } catch (e) {
+    const status = (e as { status?: number })?.status;
+    const message = e instanceof Error ? e.message : String(e);
+    return status === 401 || /AUTH_REJECTED|unauthorized/i.test(message)
+      ? false
+      : null;
+  }
+}
+
+/**
+ * Signed round-trip (`listNamespaces`) — the cheapest call that actually
+ * exercises the delegate key. `health()` itself is unauthenticated, so
+ * without this a rotated or mis-pasted MEMWAL_PRIVATE_KEY shows up only as
+ * silent 401s on recall/save; `auth` answers that question directly:
+ * true/false/null = accepted / rejected / not measured.
+ *
+ * Deliberately non-blocking: the relayer's first RTT from a cold instance
+ * routinely costs ~2.5s, and the landing page, Render's health checks and the
+ * keep-alive cron all read this route. It returns whatever is cached (stale
+ * value, or null before the first measurement) and refreshes in the
+ * background on a five-minute TTL.
+ */
+function relayerAuth(enabled: boolean): boolean | null {
+  if (!enabled) return null;
+  if (authCache && Date.now() - authCache.at < AUTH_CACHE_TTL_MS) {
+    return authCache.value;
+  }
+  if (!authInFlight) {
+    authInFlight = measureRelayerAuth()
+      .then((value) => {
+        authCache = { value, at: Date.now() };
+        return value;
+      })
+      .finally(() => {
+        authInFlight = null;
+      });
+  }
+  return authCache ? authCache.value : null;
 }
 
 async function relayerHealth(
@@ -100,6 +165,8 @@ async function buildHealth(): Promise<HealthBody> {
       : Promise.resolve(false),
     walrusTask,
   ]);
+  // Sync: returns the cached verdict and refreshes it in the background.
+  const auth = relayerAuth(memwalConfigured);
 
   const body: HealthBody = {
     ok: true,
@@ -107,7 +174,7 @@ async function buildHealth(): Promise<HealthBody> {
     llm: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
     memwalConfigured,
     network: memwalNetwork(),
-    relayer,
+    relayer: { ...relayer, auth },
     database,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     zkLogin: {
