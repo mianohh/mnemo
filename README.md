@@ -223,7 +223,7 @@ The expiry report a cron should poll. Every Walrus blob has a mandatory end epoc
 
 * **Authentication:** signed-in session **or** `Authorization: Bearer $CRON_SECRET`.
 * **Behaviour:** forces a fresh Sui reconciliation, then reports per-blob end epochs, the epoch clock, and the object ids needed to renew.
-* **Response:** the `expiry` object above plus `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`.
+* **Response:** the `expiry` object above plus `sync` (`fetched` / `linked`, with `renormalized` when rows needed blob-id canonicalization and `unlinked`, a sample of ids still unmatched), `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`.
 * **Renewal:** `walrus extend --blob-obj-id <blob_object_id>` — only possible **before** the end epoch, and only from the wallet that owns the blob objects (`MEMWAL_OWNER_ADDRESS`). Blobs are bought for 15 epochs (~7 months) and nothing extends them automatically.
 
 **Cron:** `.github/workflows/expiry.yml` polls this endpoint daily at 06:17 UTC (and on demand via *Run workflow*), fails the job when `warn` flips true so the repo's notification settings email you, and warns when mirror rows are still unlinked to Sui. It needs two GitHub Actions entries — the same `MNEMO_API_URL` variable the keep-alive workflow uses, plus `CRON_SECRET` as a **secret** with the identical value to the Render env var:
