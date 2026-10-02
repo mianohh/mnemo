@@ -42,10 +42,20 @@ jobs:
 
           d = json.load(open("expiry.json"))
           print(json.dumps({k: d.get(k) for k in (
-              "anchored", "unanchored", "walrusEpoch", "epochLengthDays",
+              "anchored", "unanchored", "chainBlobs", "deletableBlobs",
+              "epochSource", "walrusEpoch", "epochLengthDays",
               "soonestExpiryEpoch", "soonestExpiresAt", "epochsRemaining",
               "daysRemaining", "warn",
           )}, indent=1))
+
+          # Without the chain's own numbers the report is mirror-only, which
+          # reads "no blobs, nothing at risk" whenever no row has been linked
+          # — a false all-clear on exactly the days this cron exists for.
+          if d.get("chainBlobs") is None:
+              print("::error::expiry report has no on-chain numbers "
+                    "(chainBlobs is null) — Sui unreachable or MEMWAL_ACCOUNT_ID "
+                    "unset, so nothing in this report can be trusted")
+              sys.exit(1)
 
           # Lapsed blobs are unrecoverable: fail loudly well before the end epoch.
           if d.get("warn"):

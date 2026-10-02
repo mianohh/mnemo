@@ -1,4 +1,9 @@
-import { fetchOwnedBlobs, isBlobCacheStale } from "./walrus-chain";
+import {
+  fetchEpochState,
+  fetchOwnedBlobs,
+  isBlobCacheStale,
+  type OnChainBlob,
+} from "./walrus-chain";
 import {
   countUnanchored,
   linkNormalizedAnchors,
@@ -70,6 +75,40 @@ export async function maybeSyncAnchors(): Promise<SyncResult | null> {
 }
 
 /**
+ * The chain's answer to "what is expiring": every Blob we own, which epoch we
+ * are in now, and when epoch 1 began (the anchor that turns end epochs into
+ * dates). This is what an expiry report is judged against — the mirror only
+ * agrees with it for rows that have been linked to a Sui object.
+ */
+export interface ChainExpiryInput {
+  blobs: OnChainBlob[];
+  epoch: number;
+  epoch1StartMs: number;
+  epochMs: number;
+}
+
+/**
+ * Read the chain view. Never throws: `null` means "no chain numbers right
+ * now", and every caller already renders the mirror-only summary in that case.
+ */
+export async function chainExpiryContext(): Promise<ChainExpiryInput | null> {
+  try {
+    const accountId = process.env.MEMWAL_ACCOUNT_ID;
+    if (!accountId) return null;
+    const blobs = await fetchOwnedBlobs({ accountId });
+    const state = await fetchEpochState();
+    return {
+      blobs,
+      epoch: state.epoch,
+      epoch1StartMs: state.epoch1StartMs,
+      epochMs: walrusEpochMs(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Walrus mainnet epoch length. The docs state 14 days; `WALRUS_EPOCH_MS` is
  * an escape hatch if the network retunes it.
  */
@@ -102,7 +141,7 @@ export interface EpochClock {
  * boundaries gives the epoch length. No extra chain round trip, and it
  * self-corrects as new memories arrive.
  */
-export function buildEpochClock(
+function buildEpochClock(
   marks: { epoch: number; firstAt: number; lastAt: number }[],
   now = Date.now()
 ): EpochClock | null {
@@ -135,6 +174,16 @@ export interface ExpirySummary {
   anchored: number;
   /** Blobs whose Sui object id has not been resolved yet. */
   unanchored: number;
+  /**
+   * Blobs we own on Sui — the set that actually has to be renewed. Null when
+   * the chain was unreachable; unlike `anchored` it does not depend on the
+   * mirror having been linked to those objects yet.
+   */
+  chainBlobs: number | null;
+  /** Of those, how many their owner may delete (Walrus `deletable` flag). */
+  deletableBlobs: number | null;
+  /** Where `walrusEpoch` came from: the system object, or mirror write times. */
+  epochSource: "chain" | "mirror" | null;
   walrusEpoch: number | null;
   epochLengthDays: number;
   /** End epoch of the soonest-expiring blob (null when nothing is anchored). */
@@ -149,19 +198,62 @@ export interface ExpirySummary {
   byEpoch: { expiryEpoch: number; blobs: number; epochsRemaining: number }[];
 }
 
+/**
+ * An epoch clock anchored on the chain instead of on mirror writes.
+ *
+ * The epoch number is exact (read from the system object); the dates hang off
+ * the package's first event and are re-phased by whole epochs so `now` always
+ * lands inside the current epoch. That keeps every reported boundary — in
+ * particular the ones epochs away — within one epoch of the truth even if the
+ * configured epoch length differs from the network's real average.
+ */
+function buildChainClock(
+  chain: Pick<ChainExpiryInput, "epoch" | "epoch1StartMs" | "epochMs">,
+  now = Date.now()
+): EpochClock {
+  const startOf = (anchor: number, target: number) =>
+    anchor + (target - 1) * chain.epochMs;
+  const drift = now - startOf(chain.epoch1StartMs, chain.epoch);
+  const anchor =
+    chain.epoch1StartMs + Math.floor(drift / chain.epochMs) * chain.epochMs;
+
+  return {
+    epoch: chain.epoch,
+    epochMs: chain.epochMs,
+    epochStartAt: (target) => startOf(anchor, target),
+    epochsUntil: (expiryEpoch) => expiryEpoch - chain.epoch,
+  };
+}
+
+/** Chain first, mirror second: the chain knows the epoch, the mirror the dates. */
+export function resolveExpiryClock(
+  snapshot: Pick<ExpirySnapshot, "anchors">,
+  chain: ChainExpiryInput | null,
+  now = Date.now()
+): EpochClock | null {
+  if (chain) return buildChainClock(chain, now);
+  return buildEpochClock(snapshot.anchors, now);
+}
+
 export function summariseExpiry(
   snapshot: Pick<ExpirySnapshot, "anchored" | "unanchored" | "anchors" | "minExpiryEpoch">,
   entries: ExpiryEntry[],
-  now = Date.now()
+  opts: { now?: number; chain?: ChainExpiryInput | null } = {}
 ): ExpirySummary {
-  const clock = buildEpochClock(snapshot.anchors, now);
+  const now = opts.now ?? Date.now();
+  const chain = opts.chain ?? null;
+  const clock = resolveExpiryClock(snapshot, chain, now);
+
+  // What expires is decided by the chain. The mirror's `entries` are only the
+  // rows already linked to a Sui object, so they stand in solely when the
+  // chain cannot be read.
+  const expiryEpochs = chain
+    ? chain.blobs.map((b) => b.endEpoch)
+    : entries.map((e) => e.expiryEpoch);
 
   const byEpochMap = new Map<number, number>();
-  for (const entry of entries) {
-    byEpochMap.set(
-      entry.expiryEpoch,
-      (byEpochMap.get(entry.expiryEpoch) ?? 0) + 1
-    );
+  for (const expiryEpoch of expiryEpochs) {
+    byEpochMap.set(expiryEpoch, (byEpochMap.get(expiryEpoch) ?? 0) + 1);
   }
   const byEpoch = [...byEpochMap.entries()]
     .sort(([a], [b]) => a - b)
@@ -171,7 +263,11 @@ export function summariseExpiry(
       epochsRemaining: clock ? expiryEpoch - clock.epoch : 0,
     }));
 
-  const soonest = snapshot.minExpiryEpoch;
+  const soonest = chain
+    ? expiryEpochs.length > 0
+      ? Math.min(...expiryEpochs)
+      : null
+    : snapshot.minExpiryEpoch;
   const epochsRemaining =
     soonest !== null && clock ? soonest - clock.epoch : null;
   const daysRemaining =
@@ -182,8 +278,15 @@ export function summariseExpiry(
   return {
     anchored: snapshot.anchored,
     unanchored: snapshot.unanchored,
+    chainBlobs: chain ? chain.blobs.length : null,
+    deletableBlobs: chain
+      ? chain.blobs.filter((b) => b.deletable).length
+      : null,
+    epochSource: chain ? "chain" : clock ? "mirror" : null,
     walrusEpoch: clock ? clock.epoch : null,
-    epochLengthDays: Number((walrusEpochMs() / 86_400_000).toFixed(2)),
+    epochLengthDays: Number(
+      ((clock?.epochMs ?? walrusEpochMs()) / 86_400_000).toFixed(2)
+    ),
     soonestExpiryEpoch: soonest,
     soonestExpiresAt:
       soonest !== null && clock

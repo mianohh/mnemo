@@ -8,7 +8,8 @@ import {
 } from "@/lib/memory/store";
 import {
   EXPIRY_WARN_EPOCHS,
-  buildEpochClock,
+  chainExpiryContext,
+  resolveExpiryClock,
   syncAnchors,
   summariseExpiry,
 } from "@/lib/memory/anchor";
@@ -53,8 +54,13 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
-  const summary = summariseExpiry(snapshot, entries);
-  const clock = buildEpochClock(snapshot.anchors);
+  // The chain decides what expires: the blobs we own plus the epoch we are in
+  // now. Best effort — without it the report falls back to the mirror's own
+  // linked rows, which is exactly the view that goes empty on a fresh deploy.
+  const chain = await chainExpiryContext();
+
+  const summary = summariseExpiry(snapshot, entries, { chain });
+  const clock = resolveExpiryClock(snapshot, chain);
 
   const blobs = entries
     .map((entry) => ({
@@ -67,6 +73,17 @@ async function handle(req: Request): Promise<Response> {
     }))
     .sort((a, b) => a.expiryEpoch - b.expiryEpoch);
 
+  // Renewal order is expiry order, and the chain owns the object ids even for
+  // blobs no mirror row has been linked to — which is most of them on a fresh
+  // deploy, where `blobs` would hand back nothing at all.
+  const renewObjects = (
+    chain
+      ? [...chain.blobs]
+          .sort((a, b) => a.endEpoch - b.endEpoch)
+          .map((b) => b.objectId)
+      : blobs.map((b) => b.objectId)
+  ).slice(0, 50);
+
   return Response.json({
     ...summary,
     // `unlinked` is the diagnostic for a sync that found blobs but matched
@@ -78,7 +95,7 @@ async function handle(req: Request): Promise<Response> {
     renewWith: {
       owner: cachedOwner() ?? process.env.MEMWAL_OWNER_ADDRESS ?? null,
       command: "walrus extend --blob-obj-id <blob_object_id> --epochs-extended <n>",
-      objects: blobs.slice(0, 50).map((b) => b.objectId),
+      objects: renewObjects,
     },
     blobs,
   });

@@ -1,6 +1,10 @@
 import { getMemWal, memoryConfigured, memwalNetwork } from "@/lib/memory/client";
 import { pingDatabase, expirySnapshot } from "@/lib/memory/store";
-import { summariseExpiry, type ExpirySummary } from "@/lib/memory/anchor";
+import {
+  chainExpiryContext,
+  summariseExpiry,
+  type ExpirySummary,
+} from "@/lib/memory/anchor";
 
 export const runtime = "nodejs";
 
@@ -41,6 +45,8 @@ interface HealthBody {
     ExpirySummary,
     | "anchored"
     | "unanchored"
+    | "chainBlobs"
+    | "epochSource"
     | "walrusEpoch"
     | "soonestExpiryEpoch"
     | "epochsRemaining"
@@ -136,19 +142,29 @@ async function buildHealth(): Promise<HealthBody> {
   const databaseConfigured = Boolean(process.env.DATABASE_URL);
 
   const walrusTask = databaseConfigured
-    ? withTimeout(expirySnapshot())
-        .then((snapshot) => {
+    ? Promise.all([
+        withTimeout(expirySnapshot()),
+        // Chain numbers decide what actually expires. Without them an uptime
+        // monitor would read a mirror-only "nothing linked, nothing at risk"
+        // on a deploy whose mirror rows have never been resolved on Sui.
+        withTimeout(chainExpiryContext()).catch(() => null),
+      ])
+        .then(([snapshot, chain]) => {
           const {
             anchored,
             unanchored,
+            chainBlobs,
+            epochSource,
             walrusEpoch,
             soonestExpiryEpoch,
             epochsRemaining,
             warn,
-          } = summariseExpiry(snapshot, []);
+          } = summariseExpiry(snapshot, [], { chain });
           return {
             anchored,
             unanchored,
+            chainBlobs,
+            epochSource,
             walrusEpoch,
             soonestExpiryEpoch,
             epochsRemaining,

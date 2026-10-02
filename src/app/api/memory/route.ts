@@ -14,6 +14,7 @@ import {
   listMemories,
 } from "@/lib/memory/store";
 import {
+  chainExpiryContext,
   maybeSyncAnchors,
   summariseExpiry,
   type ExpirySummary,
@@ -49,7 +50,11 @@ export async function GET(req: Request) {
     memories = await listMemories(namespace);
     counts = await countByCategory(namespace);
     mirrorCount = await countMemories(namespace);
-    expiry = summariseExpiry(await expirySnapshot(), await listExpiries());
+    // Chain first: the dashboard's epoch/expiry line should reflect the blobs
+    // we own even while the mirror's own rows are still unlinked.
+    expiry = summariseExpiry(await expirySnapshot(), await listExpiries(), {
+      chain: await chainExpiryContext(),
+    });
   } catch {
     return Response.json({ error: "Database unavailable" }, { status: 503 });
   }

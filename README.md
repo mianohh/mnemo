@@ -182,10 +182,13 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
   "expiry": {
     "anchored": 147,
     "unanchored": 0,
+    "chainBlobs": 147,
+    "deletableBlobs": 147,
+    "epochSource": "chain",
     "walrusEpoch": 40,
     "epochLengthDays": 14,
     "soonestExpiryEpoch": 47,
-    "soonestExpiresAt": "2026-12-31T08:34:30.332Z",
+    "soonestExpiresAt": "2027-01-01T10:14:01.612Z",
     "epochsRemaining": 7,
     "daysRemaining": 98,
     "warn": false
@@ -217,16 +220,18 @@ Returns mirror records, categorical counts, and live Walrus network telemetry.
 
 `blobObjectId` / `blobStartEpoch` / `blobExpiryEpoch` come from the Walrus `Blob` object on Sui — the relayer transfers every blob it writes to the account owner, so the owner's object set is the on-chain truth. The route reconciles any unresolved rows on first load (read-only Sui GraphQL; a Sui hiccup degrades to "unresolved" rather than an error).
 
+`chainBlobs` / `deletableBlobs` / `epochSource` are the Sui side of the same picture: `chainBlobs` is every `Blob` object the owner holds — the set that must actually be renewed — whereas `anchored` counts only mirror rows already linked to one of them, and `unanchored` rows that are not yet. `epochSource` says where `walrusEpoch` came from: `"chain"` (the system object's future-accounting ring, exact) or `"mirror"` (inferred from mirror write times, used only when Sui is unreachable). Epoch **numbers** are exact in both cases; the `…At` dates are projected from `WALRUS_EPOCH_MS` (14 days by default) anchored on the package's first event, so read them as within a few days of the truth rather than to the minute.
+
 #### `GET /api/memory/expiry`
 
 The expiry report a cron should poll. Every Walrus blob has a mandatory end epoch, and **a lapsed blob cannot be renewed or recovered** — the relayer only drops the index rows when it starts 404ing.
 
 * **Authentication:** signed-in session **or** `Authorization: Bearer $CRON_SECRET`.
-* **Behaviour:** forces a fresh Sui reconciliation, then reports per-blob end epochs, the epoch clock, and the object ids needed to renew.
-* **Response:** the `expiry` object above plus `sync` (`fetched` / `linked`, with `renormalized` when rows needed blob-id canonicalization and `unlinked`, a sample of ids still unmatched), `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`.
+* **Behaviour:** forces a fresh Sui reconciliation, then reports the end epochs of every blob we own, the epoch clock, and the object ids needed to renew.
+* **Response:** the `expiry` object above plus `sync` (`fetched` / `linked`, with `renormalized` when rows needed blob-id canonicalization and `unlinked`, a sample of ids still unmatched), `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`. `byEpoch`, `soonestExpiryEpoch`, `warn` and `renewWith.objects` are computed from the **chain's** blob set when Sui is readable, so the report is meaningful even while `linked` is 0 and the mirror has nothing anchored yet; `blobs[]` stays the per-mirror-row view (each row's own object id, expiry date and warning) and is empty until rows are linked. `renewWith.objects` is ordered soonest-expiring first.
 * **Renewal:** `walrus extend --blob-obj-id <blob_object_id>` — only possible **before** the end epoch, and only from the wallet that owns the blob objects (`MEMWAL_OWNER_ADDRESS`). Blobs are bought for 15 epochs (~7 months) and nothing extends them automatically.
 
-**Cron:** `.github/workflows/expiry.yml` polls this endpoint daily at 06:17 UTC (and on demand via *Run workflow*), fails the job when `warn` flips true so the repo's notification settings email you, and warns when mirror rows are still unlinked to Sui. It needs two GitHub Actions entries — the same `MNEMO_API_URL` variable the keep-alive workflow uses, plus `CRON_SECRET` as a **secret** with the identical value to the Render env var:
+**Cron:** `.github/workflows/expiry.yml` polls this endpoint daily at 06:17 UTC (and on demand via *Run workflow*), fails the job when `warn` flips true so the repo's notification settings email you, fails it too when the response carries no on-chain numbers (`chainBlobs: null`, i.e. the report fell back to a mirror that may say "nothing at risk" while blobs expire), and warns when mirror rows are still unlinked to Sui. It needs two GitHub Actions entries — the same `MNEMO_API_URL` variable the keep-alive workflow uses, plus `CRON_SECRET` as a **secret** with the identical value to the Render env var:
 
 *Settings ▸ Secrets and variables ▸ Actions ▸ Variables/Secrets*
 

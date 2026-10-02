@@ -42,6 +42,9 @@ interface MemoryResponse {
   expiry?: {
     anchored: number;
     unanchored: number;
+    /** Blobs owned on Sui — null when the chain could not be read. */
+    chainBlobs?: number | null;
+    epochSource?: "chain" | "mirror" | null;
     walrusEpoch: number | null;
     soonestExpiryEpoch: number | null;
     soonestExpiresAt: string | null;
@@ -318,9 +321,13 @@ function Dashboard({ address }: { address: string }) {
               : "text-muted-foreground"
           )}
         >
-          Walrus holds {data.expiry.anchored} blob
-          {data.expiry.anchored === 1 ? "" : "s"} on epoch{" "}
+          Walrus holds {data.expiry.chainBlobs ?? data.expiry.anchored} blob
+          {(data.expiry.chainBlobs ?? data.expiry.anchored) === 1 ? "" : "s"} on
+          epoch{" "}
           {data.expiry.epochLengthDays}-day clock
+          {data.expiry.chainBlobs != null &&
+            data.expiry.chainBlobs !== data.expiry.anchored &&
+            ` · ${data.expiry.anchored} linked to memories`}
           {data.expiry.soonestExpiresAt && (
             <>
               {" "}

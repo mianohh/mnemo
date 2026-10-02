@@ -39,6 +39,10 @@ const globalScope = globalThis as unknown as {
     /** True when the last refresh failed and these rows are from before it. */
     stale: boolean;
   };
+  __mnemoEpochCache?: {
+    value: ChainEpochState;
+    at: number;
+  };
 };
 
 function graphqlUrl(): string {
@@ -227,4 +231,97 @@ export function cachedOwner(): string | null {
 /** True when the last chain refresh failed and the cache is from before it. */
 export function isBlobCacheStale(): boolean {
   return globalScope.__mnemoBlobCache?.stale === true;
+}
+
+/**
+ * The Walrus system object (shared, not owned). Its single dynamic field
+ * carries the epoch state: `future_accounting.ring_buffer` holds one entry per
+ * epoch with slots laid out as `epoch mod length`, and `current_index` points
+ * at the entry of the epoch we are in — so reading slot `current_index` *is*
+ * reading the current epoch. Overridable for networks provisioned elsewhere.
+ */
+const DEFAULT_SYSTEM_OBJECT =
+  "0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2";
+/** The epoch only moves twice a month; the anchor never moves at all. */
+const EPOCH_CACHE_TTL_MS = 5 * 60_000;
+
+export interface ChainEpochState {
+  /** Current Walrus epoch, read from the system object. Exact, not estimated. */
+  epoch: number;
+  /** Wall-clock start of epoch 1 (the first event of the package), in ms. */
+  epoch1StartMs: number;
+}
+
+function systemObject(): string {
+  return process.env.WALRUS_SYSTEM_OBJECT ?? DEFAULT_SYSTEM_OBJECT;
+}
+
+/** `<package>` prefix, shared by every event the Walrus package emits. */
+function packagePrefix(): string {
+  const blobType = process.env.WALRUS_BLOB_TYPE ?? DEFAULT_BLOB_TYPE;
+  return blobType.split("::")[0];
+}
+
+interface EpochStatePage {
+  object: {
+    asMoveObject: {
+      dynamicFields: { nodes: { contents: { json: unknown } }[] };
+    } | null;
+  } | null;
+  events: { nodes: { timestamp: string }[] };
+}
+
+function readCurrentEpoch(data: EpochStatePage): number {
+  const nodes = data.object?.asMoveObject?.dynamicFields?.nodes ?? [];
+  for (const node of nodes) {
+    const json = node.contents.json as {
+      future_accounting?: unknown;
+      value?: { future_accounting?: unknown };
+    };
+    const accounting = (json.future_accounting ??
+      json.value?.future_accounting) as
+      | { current_index?: unknown; ring_buffer?: { epoch?: unknown }[] }
+      | undefined;
+    if (!accounting || !Array.isArray(accounting.ring_buffer)) continue;
+    const slot = accounting.ring_buffer[Number(accounting.current_index)];
+    const epoch = Number(slot?.epoch);
+    if (Number.isInteger(epoch) && epoch > 0) return epoch;
+  }
+  throw new Error("could not read the Walrus epoch from the system object");
+}
+
+/**
+ * The two facts expiry dates are built from, in one round trip: the epoch we
+ * are in right now (system object) and when epoch 1 began (first event of the
+ * package — the anchor dates are measured from). Throws on anything unexpected
+ * so callers fall back to the mirror clock rather than print a number they
+ * cannot stand behind.
+ */
+export async function fetchEpochState(): Promise<ChainEpochState> {
+  const cache = globalScope.__mnemoEpochCache;
+  if (cache && Date.now() - cache.at < EPOCH_CACHE_TTL_MS) return cache.value;
+
+  const data = await gql<EpochStatePage>(
+    `query($id: SuiAddress!, $module: String!) {
+      object(address: $id) {
+        asMoveObject {
+          dynamicFields(first: 50) { nodes { contents { json } } }
+        }
+      }
+      events(first: 1, filter: { module: $module }) { nodes { timestamp } }
+    }`,
+    { id: systemObject(), module: packagePrefix() }
+  );
+
+  const epoch = readCurrentEpoch(data);
+  const raw = data.events.nodes[0]?.timestamp;
+  if (!raw) throw new Error("could not read the first Walrus event");
+  const epoch1StartMs = /^\d+$/.test(raw) ? Number(raw) : Date.parse(raw);
+  if (!Number.isFinite(epoch1StartMs)) {
+    throw new Error(`unexpected Walrus event timestamp: ${raw}`);
+  }
+
+  const value: ChainEpochState = { epoch, epoch1StartMs };
+  globalScope.__mnemoEpochCache = { value, at: Date.now() };
+  return value;
 }
