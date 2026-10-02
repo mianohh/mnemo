@@ -62,7 +62,7 @@ flowchart TB
 | :--- | :--- |
 | **Cryptographic Multi-Tenancy** | Authentication accepts two sign-in paths, both resolving to a verified Sui address: a wallet personal-message challenge, or **Sui zkLogin address derivation** ("Continue with email" — Google OIDC; the address is derived server-side from the verified JWT, no proving service). The storage namespace is deterministically generated as `mnemo-user-{address}` from the verified signer. Clients cannot forge, switch, or inspect arbitrary namespaces. |
 | **Categorical Fact Extraction** | Chat streams pass through a secondary evaluation stage using Google Gemini Flash and Zod schemas, filtering out conversational filler. Context is classified into four durable primitives: `project`, `constraint`, `decision`, or `preference`. |
-| **Deterministic Vector Retrieval** | Before generating responses, semantic search queries the user namespace with a relevance floor of ≥ 0.2; if every hit falls below the floor, the nearest few are returned instead of nothing. Context is dynamically prepended to the system prompt with strict grounding constraints to eliminate hallucinations. |
+| **Deterministic Vector Retrieval** | Before generating responses, semantic search queries the user namespace with a relevance floor of ≥ 0.2; if every hit falls below the floor, the nearest few are returned instead of nothing. Recalled facts are injected as a **separate user message** behind a per-request nonce boundary (`BEGIN_UNTRUSTED_WALRUS_MEMORY_…`), with a fixed untrusted-data policy in the system prompt — no memory byte ever holds system priority — plus strict grounding constraints to eliminate hallucinations. |
 | **Vector Index Lag Mitigation** | Asynchronous decentralized writes (encrypt → upload → index) can introduce short replication latencies. Mnemo detects pending writes against the local mirror and executes a short linear backoff retry loop during retrieval, preventing empty recalls. |
 | **Causal Evidence & Provenance** | The UI renders an active `[N] memories applied` chip on every contextual response. Expanding the chip reveals the exact stored memories alongside their cosine similarity relevance scores. |
 | **A/B Counterfactual Testing** | An integrated **Memory ON/OFF** toggle on the chat interface bypasses recall injection and memory capture on demand, providing verifiable before-and-after demonstration proof. |
@@ -128,7 +128,7 @@ docker run -d --name mnemo-pg -p 5433:5433 -e POSTGRES_USER=mnemo -e POSTGRES_DB
 | `POST` | `/api/auth/zklogin/exchange` | — | Exchanges the OAuth code server-side, validates the JWT (`aud`/`iss`/`exp`), derives the zkLogin address from the HMAC salt, and sets the session cookie (the JWT never leaves the server) |
 | `POST` | `/api/auth/logout` | Session cookie | Clears the session cookie |
 | `GET` | `/api/auth/session` | Session cookie | Current address, namespace and email (`401` when signed out) |
-| `GET` | `/api/health` | — | Liveness: relayer status, database connectivity, LLM configuration, zkLogin sign-in configuration, Walrus blob lifetime |
+| `GET` | `/api/health` | — | Liveness: relayer status, `relayer.auth` delegate-key probe (`true`/`false`, `null` until the first background probe lands after boot), database connectivity, LLM configuration, zkLogin sign-in configuration, Walrus blob lifetime |
 
 ### Conversational Endpoints
 
@@ -152,7 +152,7 @@ sequenceDiagram
     A->>A: Verify HMAC session, derive namespace
     A->>W: memwal.recall(namespace, message)
     W-->>A: matching facts (relevance floor ≥ 0.2)
-    A->>G: system prompt + recalled context (stream)
+    A->>G: system prompt (trust policy) + nonce-bounded memory message (stream)
     G-->>C: streamed response
     Note over A,G: metadata on start/finish lists applied memories
     A->>G: structured extraction (max 3 facts, Zod)
@@ -226,13 +226,17 @@ The expiry report a cron should poll. Every Walrus blob has a mandatory end epoc
 * **Response:** the `expiry` object above plus `byEpoch`, `blobs[]` (each with `objectId`, `expiryEpoch`, `expiresAt`, `epochsRemaining`, `warn`) and `renewWith.command`.
 * **Renewal:** `walrus extend --blob-obj-id <blob_object_id>` — only possible **before** the end epoch, and only from the wallet that owns the blob objects (`MEMWAL_OWNER_ADDRESS`). Blobs are bought for 15 epochs (~7 months) and nothing extends them automatically.
 
-Suggested cron (daily):
+**Cron:** `.github/workflows/expiry.yml` polls this endpoint daily at 06:17 UTC (and on demand via *Run workflow*), fails the job when `warn` flips true so the repo's notification settings email you, and warns when mirror rows are still unlinked to Sui. It needs two GitHub Actions entries — the same `MNEMO_API_URL` variable the keep-alive workflow uses, plus `CRON_SECRET` as a **secret** with the identical value to the Render env var:
+
+*Settings ▸ Secrets and variables ▸ Actions ▸ Variables/Secrets*
+
+The equivalent one-liner if you'd rather run your own cron:
 
 ```bash
 curl -fsS -H "Authorization: Bearer $CRON_SECRET" https://mnemoai.xyz/api/memory/expiry
 ```
 
-`warn` flips true within 3 epochs of the first expiry, and `GET /api/health` mirrors the same numbers under `walrus` so an uptime monitor can alert on it.
+`warn` flips true within 3 epochs of the first expiry, and `GET /api/health` mirrors the same numbers under `walrus` so an uptime monitor can alert on it. The first call also backfills `blobObjectId` / `blobExpiryEpoch` for rows the dashboard has never reconciled.
 
 ---
 
