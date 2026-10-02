@@ -2,6 +2,35 @@ import { Pool, type QueryResultRow } from "pg";
 import { randomUUID } from "node:crypto";
 import type { Category, MemoryStatus, MirrorMemory } from "./types";
 
+/** One on-chain anchor per memory: the Walrus Blob object and its lifetime. */
+export interface BlobAnchor {
+  blobId: string;
+  objectId: string;
+  startEpoch: number;
+  expiryEpoch: number;
+}
+
+export interface ExpirySnapshot {
+  /** Mirror rows that carry a Walrus blob id. */
+  blobRows: number;
+  /** …of which the on-chain Blob object has been resolved. */
+  anchored: number;
+  unanchored: number;
+  /** Null until at least one blob has been resolved from Sui. */
+  minExpiryEpoch: number | null;
+  maxStartEpoch: number | null;
+  /** Distinct (start epoch, first/last write) marks, oldest first — epoch clock. */
+  anchors: { epoch: number; firstAt: number; lastAt: number }[];
+}
+
+/** One distinct blob and the epoch it lapses at. */
+export interface ExpiryEntry {
+  blobId: string;
+  objectId: string;
+  namespace: string;
+  expiryEpoch: number;
+}
+
 // One pool per warm process. Stored on globalThis so local dev (HMR) does not
 // leak connections across reloads. The API runs as one long-lived Render
 // service, so the single pool is reused across requests; the mirror lives in
@@ -42,6 +71,16 @@ function ensureSchema(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_memories_job ON memories(job_id);
+      -- On-chain Walrus anchor: which Blob object holds this memory and until
+      -- what epoch. Added after the table already existed in production, so
+      -- CREATE TABLE IF NOT EXISTS alone would never introduce them.
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS blob_object_id TEXT;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS blob_start_epoch BIGINT;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS blob_expiry_epoch BIGINT;
+      CREATE INDEX IF NOT EXISTS idx_memories_expiry
+        ON memories(blob_expiry_epoch) WHERE blob_expiry_epoch IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_memories_unanchored
+        ON memories(created_at DESC) WHERE blob_id IS NOT NULL AND blob_object_id IS NULL;
     `).then(() => undefined);
   }
   return globalStore.__mnemoSchema;
@@ -56,6 +95,12 @@ async function query<T extends QueryResultRow>(
   return res.rows;
 }
 
+async function exec(text: string, params: unknown[] = []): Promise<number> {
+  await ensureSchema();
+  const res = await getPool().query(text, params);
+  return res.rowCount ?? 0;
+}
+
 interface Row extends QueryResultRow {
   id: string;
   namespace: string;
@@ -65,6 +110,15 @@ interface Row extends QueryResultRow {
   job_id: string | null;
   status: MemoryStatus;
   created_at: Date | string;
+  blob_object_id: string | null;
+  blob_start_epoch: number | string | null;
+  blob_expiry_epoch: number | string | null;
+}
+
+function toNumberOrNull(value: number | string | null): number | null {
+  if (value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function toMemory(row: Row): MirrorMemory {
@@ -80,6 +134,9 @@ function toMemory(row: Row): MirrorMemory {
       typeof row.created_at === "string"
         ? row.created_at
         : row.created_at.toISOString(),
+    blobObjectId: row.blob_object_id ?? null,
+    blobStartEpoch: toNumberOrNull(row.blob_start_epoch ?? null),
+    blobExpiryEpoch: toNumberOrNull(row.blob_expiry_epoch ?? null),
   };
 }
 
@@ -98,6 +155,9 @@ export async function insertPendingMemory(input: {
     job_id: input.jobId ?? null,
     status: "pending",
     created_at: new Date().toISOString(),
+    blob_object_id: null,
+    blob_start_epoch: null,
+    blob_expiry_epoch: null,
   };
   await query(
     `INSERT INTO memories (id, namespace, category, text, blob_id, job_id, status, created_at)
@@ -124,6 +184,123 @@ export async function updateMemoryByJob(
     `UPDATE memories SET status = $1, blob_id = COALESCE($2, blob_id) WHERE job_id = $3`,
     [patch.status, patch.blobId ?? null, jobId]
   );
+}
+
+/**
+ * Attach on-chain identity and lifetime to mirror rows. Runs as one set-based
+ * UPDATE so a full 147-blob reconciliation is a single round trip, and it only
+ * touches rows whose stored anchor actually changed.
+ */
+export async function linkOnChainBlobs(anchors: BlobAnchor[]): Promise<number> {
+  if (anchors.length === 0) return 0;
+  return exec(
+    `UPDATE memories AS m
+     SET blob_object_id = x.object_id,
+         blob_start_epoch = x.start_epoch,
+         blob_expiry_epoch = x.expiry_epoch
+     FROM unnest($1::text[], $2::text[], $3::int[], $4::int[])
+       AS x(blob_id, object_id, start_epoch, expiry_epoch)
+     WHERE m.blob_id = x.blob_id
+       AND (m.blob_object_id IS DISTINCT FROM x.object_id
+         OR m.blob_start_epoch IS DISTINCT FROM x.start_epoch
+         OR m.blob_expiry_epoch IS DISTINCT FROM x.expiry_epoch)`,
+    [
+      anchors.map((a) => a.blobId),
+      anchors.map((a) => a.objectId),
+      anchors.map((a) => a.startEpoch),
+      anchors.map((a) => a.expiryEpoch),
+    ]
+  );
+}
+
+/** Mirror rows whose blob id has not been resolved to a Sui object yet. */
+export async function countUnanchored(): Promise<number> {
+  const rows = await query<{ n: string }>(
+    `SELECT COUNT(*) AS n FROM memories
+     WHERE blob_id IS NOT NULL AND blob_object_id IS NULL`
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Account-wide Walrus lifetime picture: how many blobs are known, how many are
+ * anchored on Sui, and the (epoch, first-write) pairs that let a caller turn
+ * "expiry epoch 47" into a date without talking to the chain again.
+ */
+export async function expirySnapshot(): Promise<ExpirySnapshot> {
+  const [summary] = await query<{
+    blob_rows: string;
+    anchored: string;
+    unanchored: string;
+    min_expiry: string | null;
+    max_start: string | null;
+  }>(
+    `SELECT COUNT(*) FILTER (WHERE blob_id IS NOT NULL) AS blob_rows,
+            COUNT(*) FILTER (WHERE blob_object_id IS NOT NULL) AS anchored,
+            COUNT(*) FILTER (WHERE blob_id IS NOT NULL
+                              AND blob_object_id IS NULL) AS unanchored,
+            MIN(blob_expiry_epoch) AS min_expiry,
+            MAX(blob_start_epoch) AS max_start
+     FROM memories`
+  );
+
+  const anchorRows = await query<{
+    epoch: string;
+    first_at: Date | string;
+    last_at: Date | string;
+  }>(
+    `SELECT blob_start_epoch AS epoch,
+            MIN(created_at) AS first_at,
+            MAX(created_at) AS last_at
+     FROM memories
+     WHERE blob_start_epoch IS NOT NULL
+     GROUP BY 1
+     ORDER BY 1`
+  );
+
+  const toMs = (value: Date | string) =>
+    typeof value === "string" ? Date.parse(value) : value.getTime();
+
+  return {
+    blobRows: Number(summary?.blob_rows ?? 0),
+    anchored: Number(summary?.anchored ?? 0),
+    unanchored: Number(summary?.unanchored ?? 0),
+    minExpiryEpoch:
+      summary?.min_expiry === null || summary?.min_expiry === undefined
+        ? null
+        : Number(summary.min_expiry),
+    maxStartEpoch:
+      summary?.max_start === null || summary?.max_start === undefined
+        ? null
+        : Number(summary.max_start),
+    anchors: anchorRows.map((r) => ({
+      epoch: Number(r.epoch),
+      firstAt: toMs(r.first_at),
+      lastAt: toMs(r.last_at),
+    })),
+  };
+}
+
+/** Distinct blobs with a known end epoch — one row per blob, newest write wins. */
+export async function listExpiries(): Promise<ExpiryEntry[]> {
+  const rows = await query<{
+    blob_id: string;
+    blob_object_id: string;
+    namespace: string;
+    blob_expiry_epoch: string | number;
+  }>(
+    `SELECT DISTINCT ON (blob_id)
+            blob_id, blob_object_id, namespace, blob_expiry_epoch
+     FROM memories
+     WHERE blob_object_id IS NOT NULL AND blob_expiry_epoch IS NOT NULL
+     ORDER BY blob_id, created_at DESC`
+  );
+  return rows.map((r) => ({
+    blobId: r.blob_id,
+    objectId: r.blob_object_id,
+    namespace: r.namespace,
+    expiryEpoch: Number(r.blob_expiry_epoch),
+  }));
 }
 
 export async function listMemories(namespace: string): Promise<MirrorMemory[]> {

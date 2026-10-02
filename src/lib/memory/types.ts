@@ -32,6 +32,12 @@ export interface MirrorMemory {
   jobId: string | null;
   status: MemoryStatus;
   createdAt: string;
+  /** Sui object id of the Walrus Blob holding this memory (null until resolved). */
+  blobObjectId: string | null;
+  /** Walrus epoch the blob was registered in. */
+  blobStartEpoch: number | null;
+  /** Walrus epoch the blob disappears at — the blob is gone from the start of it. */
+  blobExpiryEpoch: number | null;
 }
 
 export interface RecalledMemory {
