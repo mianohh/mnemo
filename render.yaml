@@ -39,3 +39,7 @@ services:
         sync: false
       - key: MEMWAL_ACCOUNT_ID
         sync: false
+      # Bearer token for the expiry cron (GET/POST /api/memory/expiry).
+      # Unset = that endpoint only answers signed-in sessions.
+      - key: CRON_SECRET
+        sync: false
