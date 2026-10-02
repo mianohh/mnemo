@@ -1,7 +1,11 @@
 import { SESSION_COOKIE, readSessionToken } from "@/lib/sui-auth";
 import { getRequestCookie } from "@/lib/http";
 import { cachedOwner } from "@/lib/memory/walrus-chain";
-import { expirySnapshot, listExpiries } from "@/lib/memory/store";
+import {
+  expirySnapshot,
+  listExpiries,
+  listUnanchoredSample,
+} from "@/lib/memory/store";
 import {
   EXPIRY_WARN_EPOCHS,
   buildEpochClock,
@@ -37,9 +41,11 @@ async function handle(req: Request): Promise<Response> {
 
   let snapshot;
   let entries;
+  let unlinked: string[] = [];
   try {
     snapshot = await expirySnapshot();
     entries = await listExpiries();
+    unlinked = await listUnanchoredSample();
   } catch {
     return Response.json(
       { error: "Database unavailable", sync },
@@ -63,7 +69,10 @@ async function handle(req: Request): Promise<Response> {
 
   return Response.json({
     ...summary,
-    sync,
+    // `unlinked` is the diagnostic for a sync that found blobs but matched
+    // none of them: compare those mirror ids against the chain's base64url
+    // ids to see whether the two sides spell the same blob differently.
+    sync: { ...sync, unlinked },
     // Renewal is only possible before the end epoch, and only from the wallet
     // that owns the Blob objects — this hands a caller exactly that list.
     renewWith: {
