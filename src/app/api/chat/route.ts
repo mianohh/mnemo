@@ -12,7 +12,11 @@ import { memoryConfigured, memwalNetwork } from "@/lib/memory/client";
 import { recallForNamespace } from "@/lib/memory/recall";
 import { saveFacts, settleAfterResponse } from "@/lib/memory/save";
 import { extractFacts } from "@/lib/memory/extract";
-import { buildSystemPrompt } from "@/lib/memory/prompt";
+import {
+  buildSystemPrompt,
+  formatMemoryContext,
+  withMemoryMessage,
+} from "@/lib/memory/prompt";
 import type {
   ChatRequestBody,
   ChatUIMessage,
@@ -81,18 +85,25 @@ export async function POST(req: Request) {
     createdAt: m.createdAt,
   }));
 
-  // 2. Generate the reply with memory context in the system prompt.
+  // 2. Generate the reply. The system prompt carries only the fixed trust
+  // policy; the recalled bytes ride in their own user message behind a nonce
+  // boundary, so nothing memory-controlled ever holds system priority.
   const system = buildSystemPrompt({
     user,
     namespace,
     memories,
     memoryEnabled,
   });
+  const converted = await convertToModelMessages(body.messages);
+  const messages =
+    memoryEnabled && memories.length > 0
+      ? withMemoryMessage(converted, formatMemoryContext(memories))
+      : converted;
 
   const result = streamText({
     model: geminiModel(),
     system,
-    messages: await convertToModelMessages(body.messages),
+    messages,
     maxRetries: 4,
   });
 
