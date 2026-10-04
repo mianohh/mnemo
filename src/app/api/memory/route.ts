@@ -12,6 +12,7 @@ import {
   expirySnapshot,
   listExpiries,
   listMemories,
+  wipeNamespaceMirror,
 } from "@/lib/memory/store";
 import {
   chainExpiryContext,
@@ -104,4 +105,38 @@ export async function GET(req: Request) {
     mcp: { url: `${origin}/api/mcp`, token: createMcpToken(address) },
     grouped,
   });
+}
+
+/**
+ * Wipe this user's Postgres mirror — every memory row and conversation.
+ * Deliberately mirror-only: Walrus blobs are not deletable through memwal
+ * and keep their own epoch expiry. Guarded by a typed confirmation so no
+ * stray fetch can destroy data by accident.
+ */
+export async function DELETE(req: Request) {
+  const address = readSessionToken(getRequestCookie(req, SESSION_COOKIE));
+  if (!address) {
+    return Response.json({ error: "Not signed in" }, { status: 401 });
+  }
+
+  let confirm: unknown;
+  try {
+    const body = (await req.json()) as { confirm?: unknown };
+    confirm = body?.confirm;
+  } catch {
+    confirm = undefined;
+  }
+  if (confirm !== "DELETE") {
+    return Response.json(
+      { error: 'Confirmation required: send {"confirm":"DELETE"}' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const result = await wipeNamespaceMirror(addressNamespace(address));
+    return Response.json(result);
+  } catch {
+    return Response.json({ error: "Database unavailable" }, { status: 503 });
+  }
 }
