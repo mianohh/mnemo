@@ -287,6 +287,11 @@
 .markdown pre code {
   @apply bg-transparent p-0 text-inherit;
 }
+/* CodeBlock adds its own header/copy chrome around the <pre>, so the generic
+   block's margin and radius must not stack inside the wrapper. */
+.markdown .code-block pre {
+  @apply m-0 rounded-none;
+}
 .markdown a {
   @apply underline underline-offset-2;
 }
