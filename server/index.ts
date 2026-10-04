@@ -8,9 +8,13 @@ import { GET as authSession } from "../src/app/api/auth/session/route";
 import { GET as zkLoginPrepare } from "../src/app/api/auth/zklogin/prepare/route";
 import { POST as zkLoginExchange } from "../src/app/api/auth/zklogin/exchange/route";
 import { POST as chatPost } from "../src/app/api/chat/route";
+import {
+  GET as conversationsGet,
+  DELETE as conversationsDelete,
+} from "../src/app/api/conversations/route";
 import { GET as healthGet } from "../src/app/api/health/route";
 import { POST as mcpPost, GET as mcpGet, DELETE as mcpDelete } from "../src/app/api/mcp/route";
-import { GET as memoryGet } from "../src/app/api/memory/route";
+import { GET as memoryGet, DELETE as memoryDelete } from "../src/app/api/memory/route";
 import {
   GET as memoryExpiryGet,
   POST as memoryExpiryPost,
@@ -29,7 +33,8 @@ const ROUTES: Record<string, Record<string, Handler>> = {
   "/api/auth/zklogin/prepare": { GET: zkLoginPrepare },
   "/api/auth/zklogin/exchange": { POST: zkLoginExchange },
   "/api/chat": { POST: chatPost },
-  "/api/memory": { GET: memoryGet },
+  "/api/conversations": { GET: conversationsGet, DELETE: conversationsDelete },
+  "/api/memory": { GET: memoryGet, DELETE: memoryDelete },
   "/api/memory/expiry": { GET: memoryExpiryGet, POST: memoryExpiryPost },
   "/api/health": { GET: healthGet },
   "/api/mcp": { GET: mcpGet, POST: mcpPost, DELETE: mcpDelete },

@@ -10,7 +10,11 @@ import { getRequestCookie } from "@/lib/http";
 import { addressNamespace, shortAddress } from "@/lib/sui";
 import { memoryConfigured, memwalNetwork } from "@/lib/memory/client";
 import { recallForNamespace } from "@/lib/memory/recall";
-import { saveFacts, settleAfterResponse } from "@/lib/memory/save";
+import {
+  saveFacts,
+  settleAfterResponse,
+} from "@/lib/memory/save";
+import { saveConversationSnapshot } from "@/lib/memory/store";
 import { extractFacts } from "@/lib/memory/extract";
 import {
   buildSystemPrompt,
@@ -39,6 +43,22 @@ function lastUserText(messages: ChatUIMessage[]): string | null {
   return null;
 }
 
+/** First user line — stable across turns, so it doubles as the chat title. */
+function conversationTitle(messages: ChatUIMessage[]): string {
+  for (const m of messages) {
+    if (m.role !== "user") continue;
+    const text = m.parts
+      .map((p) => (p.type === "text" ? p.text : ""))
+      .join("")
+      .trim();
+    if (text) return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  }
+  return "New chat";
+}
+
+// Keep snapshots bounded so one marathon thread cannot bloat a JSONB row.
+const MAX_SNAPSHOT_MESSAGES = 200;
+
 export async function POST(req: Request) {
   let body: ChatRequestBody;
   try {
@@ -55,6 +75,9 @@ export async function POST(req: Request) {
   }
   if (!Array.isArray(body.messages) || body.messages.length === 0) {
     return Response.json({ error: "No messages" }, { status: 400 });
+  }
+  if (body.conversationId !== undefined && typeof body.conversationId !== "string") {
+    return Response.json({ error: "Invalid conversationId" }, { status: 400 });
   }
   if (!process.env.GEMINI_API_KEY) {
     return Response.json(
@@ -132,25 +155,59 @@ export async function POST(req: Request) {
           })
         );
 
-        if (!memoryEnabled) return;
+        const answer = await result.text;
 
         // 3. After the reply: extract durable facts and anchor them to Walrus.
-        try {
-          const answer = await result.text;
-          const facts = await extractFacts(promptText, answer);
-          if (facts.length > 0) {
-            const { saved, settle } = await saveFacts(namespace, facts);
-            settleAfterResponse(settle);
-            if (saved.length > 0) {
-              writer.write({
-                type: "data-savedFacts",
-                id: crypto.randomUUID(),
-                data: { facts, network: memwalNetwork() },
-              });
+        let savedFactsPart: ChatUIMessage["parts"][number] | undefined;
+        if (memoryEnabled) {
+          try {
+            const facts = await extractFacts(promptText, answer);
+            if (facts.length > 0) {
+              const { saved, settle } = await saveFacts(namespace, facts);
+              settleAfterResponse(settle);
+              if (saved.length > 0) {
+                const data = { facts, network: memwalNetwork() };
+                const id = crypto.randomUUID();
+                writer.write({ type: "data-savedFacts", id, data });
+                savedFactsPart = { type: "data-savedFacts", id, data };
+              }
             }
+          } catch (e) {
+            console.error("[mnemo] save failed:", e);
+          }
+        }
+
+        // 4. Persist the whole thread. History is a UI feature, not the bot's
+        // memory, so it saves even in forget mode (only step 3 is gated).
+        try {
+          const assistantMessage: ChatUIMessage = {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            parts: [
+              { type: "text", text: answer },
+              ...(savedFactsPart ? [savedFactsPart] : []),
+            ],
+            metadata,
+          };
+          const savedId = await saveConversationSnapshot({
+            id: body.conversationId ?? null,
+            namespace,
+            title: conversationTitle(body.messages),
+            messages: [...body.messages, assistantMessage].slice(
+              -MAX_SNAPSHOT_MESSAGES
+            ),
+          });
+          // Only speak up when the row is new (or the client's id went stale),
+          // so the browser can adopt the id it should send next turn.
+          if (savedId !== body.conversationId) {
+            writer.write({
+              type: "data-conversationId",
+              id: crypto.randomUUID(),
+              data: { id: savedId },
+            });
           }
         } catch (e) {
-          console.error("[mnemo] save failed:", e);
+          console.error("[mnemo] conversation save failed:", e);
         }
       },
     }),

@@ -2,6 +2,11 @@ import { Pool, type QueryResultRow } from "pg";
 import { randomUUID } from "node:crypto";
 import { normalizeBlobId } from "./walrus-chain";
 import type { Category, MemoryStatus, MirrorMemory } from "./types";
+import type {
+  ChatUIMessage,
+  ConversationDetail,
+  ConversationSummary,
+} from "../chat-types";
 
 /** One on-chain anchor per memory: the Walrus Blob object and its lifetime. */
 export interface BlobAnchor {
@@ -82,6 +87,18 @@ function ensureSchema(): Promise<void> {
         ON memories(blob_expiry_epoch) WHERE blob_expiry_epoch IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_memories_unanchored
         ON memories(created_at DESC) WHERE blob_id IS NOT NULL AND blob_object_id IS NULL;
+      -- Chat history: one row per conversation, the whole thread as a JSONB
+      -- snapshot so a turn (or a regenerate) rewrites the row idempotently.
+      CREATE TABLE IF NOT EXISTS conversations (
+        id TEXT PRIMARY KEY,
+        namespace TEXT NOT NULL,
+        title TEXT NOT NULL,
+        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversations_namespace
+        ON conversations(namespace, updated_at DESC);
     `).then(() => undefined);
   }
   return globalStore.__mnemoSchema;
@@ -410,6 +427,146 @@ export async function pendingCount(namespace: string): Promise<number> {
     [namespace]
   );
   return Number(rows[0]?.n ?? 0);
+}
+
+// --- Chat history -----------------------------------------------------------
+
+/** Newest-first conversation summaries for one namespace (no message bodies). */
+export async function listConversations(
+  namespace: string,
+  limit = 50
+): Promise<ConversationSummary[]> {
+  const rows = await query<{
+    id: string;
+    title: string;
+    updated_at: Date | string;
+    n: string | number;
+  }>(
+    `SELECT id, title, updated_at, jsonb_array_length(messages) AS n
+     FROM conversations
+     WHERE namespace = $1
+     ORDER BY updated_at DESC
+     LIMIT $2`,
+    [namespace, limit]
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    updatedAt: toIso(r.updated_at),
+    messageCount: Number(r.n),
+  }));
+}
+
+/** One conversation's full thread, scoped to the caller's namespace. */
+export async function getConversation(
+  namespace: string,
+  id: string
+): Promise<ConversationDetail | null> {
+  const rows = await query<{
+    id: string;
+    title: string;
+    messages: ChatUIMessage[] | string;
+    updated_at: Date | string;
+    n: string | number;
+  }>(
+    `SELECT id, title, messages, updated_at, jsonb_array_length(messages) AS n
+     FROM conversations
+     WHERE id = $1 AND namespace = $2`,
+    [id, namespace]
+  );
+  const row = rows[0];
+  if (!row) return null;
+  const messages =
+    typeof row.messages === "string"
+      ? (JSON.parse(row.messages) as ChatUIMessage[])
+      : row.messages;
+  return {
+    id: row.id,
+    title: row.title,
+    updatedAt: toIso(row.updated_at),
+    messageCount: Number(row.n),
+    messages,
+  };
+}
+
+/**
+ * Idempotent snapshot write: one row per conversation, rewritten wholesale on
+ * every turn so retries/regenerates cannot double-append. A missing or
+ * foreign-owned `id` falls through to a fresh insert (never reusing an id
+ * that is not this namespace's).
+ */
+export async function saveConversationSnapshot(input: {
+  id?: string | null;
+  namespace: string;
+  title: string;
+  messages: ChatUIMessage[];
+}): Promise<string> {
+  if (input.id) {
+    const updated = await exec(
+      `UPDATE conversations
+       SET title = $1, messages = $2, updated_at = now()
+       WHERE id = $3 AND namespace = $4`,
+      [input.title, JSON.stringify(input.messages), input.id, input.namespace]
+    );
+    if (updated > 0) return input.id;
+  }
+  const id = randomUUID();
+  await query(
+    `INSERT INTO conversations (id, namespace, title, messages)
+     VALUES ($1, $2, $3, $4)`,
+    [id, input.namespace, input.title, JSON.stringify(input.messages)]
+  );
+  return id;
+}
+
+export async function deleteConversation(
+  namespace: string,
+  id: string
+): Promise<number> {
+  return exec(`DELETE FROM conversations WHERE id = $1 AND namespace = $2`, [
+    id,
+    namespace,
+  ]);
+}
+
+export async function deleteAllConversations(namespace: string): Promise<number> {
+  return exec(`DELETE FROM conversations WHERE namespace = $1`, [namespace]);
+}
+
+/**
+ * The full Postgres wipe: every mirror row (memories + conversations) for one
+ * namespace. On-chain Walrus blobs are deliberately untouched — they are not
+ * deletable through memwal and keep their own epoch expiry.
+ */
+export async function wipeNamespaceMirror(
+  namespace: string
+): Promise<{ memories: number; conversations: number }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const memories = await client.query(`DELETE FROM memories WHERE namespace = $1`, [
+      namespace,
+    ]);
+    const conversations = await client.query(
+      `DELETE FROM conversations WHERE namespace = $1`,
+      [namespace]
+    );
+    await client.query("COMMIT");
+    return {
+      memories: memories.rowCount ?? 0,
+      conversations: conversations.rowCount ?? 0,
+    };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+function toIso(value: Date | string): string {
+  return typeof value === "string" ? value : value.toISOString();
 }
 
 /** Cheap liveness probe for /api/health. */
