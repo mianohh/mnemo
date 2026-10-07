@@ -202,25 +202,18 @@ export interface ExpirySummary {
  * An epoch clock anchored on the chain instead of on mirror writes.
  *
  * The epoch number is exact (read from the system object); the dates hang off
- * the package's first event and are re-phased by whole epochs so `now` always
- * lands inside the current epoch. That keeps every reported boundary — in
- * particular the ones epochs away — within one epoch of the truth even if the
- * configured epoch length differs from the network's real average.
+ * the package's first event (`epoch1StartMs`). No re-phasing is needed here:
+ * we have the ground-truth epoch, so `epochStartAt(t)` is always
+ * `epoch1StartMs + (t - 1) * epochMs` — the start of epoch t as measured
+ * from when epoch 1 began.
  */
 function buildChainClock(
   chain: Pick<ChainExpiryInput, "epoch" | "epoch1StartMs" | "epochMs">,
-  now = Date.now()
 ): EpochClock {
-  const startOf = (anchor: number, target: number) =>
-    anchor + (target - 1) * chain.epochMs;
-  const drift = now - startOf(chain.epoch1StartMs, chain.epoch);
-  const anchor =
-    chain.epoch1StartMs + Math.floor(drift / chain.epochMs) * chain.epochMs;
-
   return {
     epoch: chain.epoch,
     epochMs: chain.epochMs,
-    epochStartAt: (target) => startOf(anchor, target),
+    epochStartAt: (target) => chain.epoch1StartMs + (target - 1) * chain.epochMs,
     epochsUntil: (expiryEpoch) => expiryEpoch - chain.epoch,
   };
 }
@@ -231,7 +224,7 @@ export function resolveExpiryClock(
   chain: ChainExpiryInput | null,
   now = Date.now()
 ): EpochClock | null {
-  if (chain) return buildChainClock(chain, now);
+  if (chain) return buildChainClock(chain);
   return buildEpochClock(snapshot.anchors, now);
 }
 
