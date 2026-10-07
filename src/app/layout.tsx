@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import * as React from "react";
 import { Geist_Mono, Inter_Tight, Silkscreen } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
@@ -62,7 +63,7 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
