@@ -89,7 +89,14 @@ async function handle(req: Request): Promise<Response> {
     // `unlinked` is the diagnostic for a sync that found blobs but matched
     // none of them: compare those mirror ids against the chain's base64url
     // ids to see whether the two sides spell the same blob differently.
-    sync: { ...sync, unlinked },
+    sync: {
+      fetched: sync.fetched,
+      linked: sync.linked,
+      ...(sync.renormalized !== undefined ? { renormalized: sync.renormalized } : {}),
+      ...(sync.error !== undefined ? { error: sync.error } : {}),
+      ...(sync.stale ? { stale: true } : {}),
+      unlinked,
+    },
     // Renewal is only possible before the end epoch, and only from the wallet
     // that owns the Blob objects — this hands a caller exactly that list.
     renewWith: {
