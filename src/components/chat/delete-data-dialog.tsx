@@ -47,6 +47,7 @@ export function DeleteDataDialog({
     try {
       const res = await apiFetch("/api/memory", {
         method: "DELETE",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ confirm: "DELETE" }),
       });
       const body = (await res.json()) as WipeResult & { error?: string };
