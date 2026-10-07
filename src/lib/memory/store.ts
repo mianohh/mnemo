@@ -63,7 +63,7 @@ function getPool(): Pool {
 
 function ensureSchema(): Promise<void> {
   if (!globalStore.__mnemoSchema) {
-    globalStore.__mnemoSchema = getPool()
+    const pending = getPool()
       .query(`
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY,
@@ -100,6 +100,12 @@ function ensureSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_conversations_namespace
         ON conversations(namespace, updated_at DESC);
     `).then(() => undefined);
+    globalStore.__mnemoSchema = pending;
+    // A rejected first attempt must not poison the cache: drop it so the next
+    // request retries instead of failing for the life of the process.
+    pending.catch(() => {
+      if (globalStore.__mnemoSchema === pending) globalStore.__mnemoSchema = undefined;
+    });
   }
   return globalStore.__mnemoSchema;
 }
